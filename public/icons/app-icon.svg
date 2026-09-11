@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#181719"/>
+  <circle cx="423" cy="90" r="118" fill="#D96F39" opacity=".28"/>
+  <rect x="86" y="62" width="340" height="388" rx="48" fill="#FFFDFC"/>
+  <path d="M126 112h260v218H126z" fill="#F8EDF5" stroke="#8E1E6E" stroke-width="15" stroke-linejoin="round"/>
+  <path d="M126 203h112v127M238 112v91h148M294 203v127" fill="none" stroke="#8E1E6E" stroke-width="15" stroke-linejoin="round"/>
+  <path d="M111 356h290v63H111z" fill="#181719"/>
+  <text x="256" y="384" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="29" font-weight="800" text-anchor="middle" letter-spacing="4">AUFMASS</text>
+  <text x="256" y="410" fill="#F0A06D" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" text-anchor="middle" letter-spacing="8">PRO</text>
+  <path d="M348 89h57v22h-57zM384 78h21v44h-21z" fill="#D96F39"/>
+</svg>

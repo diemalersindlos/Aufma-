@@ -1,0 +1,12 @@
+MalerAufmaß Pro
+Bearbeitungsdatum: 2026-09-01
+Live: https://maler-aufmass-pro.marcelbening.chatgpt.site
+Live-/Ausgangsstand: Sites-Version 40, interne Version V44
+Ausgangs-Branch: main
+Ausgangs-Commit: fdcf0b248ca299c4f2fe18c08d8cb6dbd51c707f
+Ausgangs-Commit-Nachricht: V44: Präzisere Raumerkennung und Einzelraumanzeige
+Ausgangs-Commit-Datum: 2026-08-23T18:33:53+01:00
+
+Lokaler Nachfolgestand: V45-Kandidat
+Status: vollständig gebaut und getestet, noch nicht in Sites gespeichert oder veröffentlicht
+Neuer Git-Commit: nicht vorhanden; der übergebene Export enthielt absichtlich kein .git-Verzeichnis
