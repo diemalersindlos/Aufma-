@@ -25,6 +25,7 @@ jobs:
           mkdir -p pruefberichte
           git rev-parse HEAD > pruefberichte/test-commit.txt
           git diff --name-status 6cb449ea8397ae3f14b96ab66f77213c8257a8e5 > pruefberichte/aenderungen.txt
+          git diff --exit-code 6cb449ea8397ae3f14b96ab66f77213c8257a8e5 -- app components lib worker db drizzle package.json package-lock.json
           git archive --format=tar.gz --output=pruefberichte/original-quellcode.tar.gz 6cb449ea8397ae3f14b96ab66f77213c8257a8e5
           node --version > pruefberichte/umgebung.txt
           npm --version >> pruefberichte/umgebung.txt
@@ -38,20 +39,52 @@ jobs:
         run: |
           set -o pipefail
           npm test 2>&1 | tee pruefberichte/original-tests.txt
-      - name: Lint pruefen
+      - name: Originalcode mit Lint pruefen
         if: always() && steps.install.outcome == 'success'
         run: |
           set -o pipefail
-          npm run lint 2>&1 | tee pruefberichte/lint.txt
+          npm run lint -- --ignore-pattern lokal 2>&1 | tee pruefberichte/lint.txt
       - name: Separaten TypeScript-Status dokumentieren
         if: always() && steps.install.outcome == 'success'
         continue-on-error: true
         run: |
           set -o pipefail
-          npx --no-install tsc --noEmit 2>&1 | tee pruefberichte/typescript.txt
+          ./node_modules/.bin/tsc --noEmit 2>&1 | tee pruefberichte/typescript.txt
+          if grep -q 'error TS' pruefberichte/typescript.txt; then exit 1; fi
       - name: Build intern zur weiteren Pruefung sichern
         if: always() && steps.original_tests.outcome == 'success'
         run: tar -czf pruefberichte/original-build.tar.gz dist
+      - name: Lokales Testpaket mit Systemschriften vorbereiten
+        if: steps.original_tests.outcome == 'success'
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          for f in Path('dist').rglob('*'):
+              if f.suffix.lower() in ('.woff', '.woff2', '.ttf', '.otf', '.eot'):
+                  f.unlink()
+          for f in Path('dist').rglob('*.css'):
+              f.write_text(re.sub(r'@font-face\s*\{[^}]*\}', '', f.read_text()))
+          PY
+          node --check lokal/server.mjs
+          node --check lokal/speicher.mjs
+          tar -czf pruefberichte/lokale-laufzeit.tar.gz lokal
+      - name: Browserwerkzeug isoliert installieren
+        if: steps.original_tests.outcome == 'success'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser-tools" --no-audit --no-fund playwright
+          "$RUNNER_TEMP/browser-tools/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Originaloberflaechen im Browser bedienen
+        if: steps.original_tests.outcome == 'success'
+        run: |
+          AUFMASS_TEST_DATA="$RUNNER_TEMP/aufmass-testdaten" node lokal/server.mjs > pruefberichte/lokaler-server.txt 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4317/__lokal/status > pruefberichte/lokaler-status.json; then break; fi
+            sleep 1
+          done
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/browser-tools/node_modules/playwright/index.mjs" node lokal/browser-pruefung.mjs
       - name: Pruefergebnisse sichern
         if: always()
         uses: actions/upload-artifact@v4
