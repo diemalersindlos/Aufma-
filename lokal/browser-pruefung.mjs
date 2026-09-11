@@ -76,7 +76,9 @@ try {
   await card.getByRole('button', { name: 'Öffnen', exact: true }).click();
   await desktop.waitForTimeout(1800);
   assert.match(await desktop.locator('body').innerText(), /Pruefraum 5 x 4/);
-  assert.match(await desktop.locator('body').innerText(), /45,00/);
+  await desktop.getByRole('button', { name: 'Summen', exact: true }).click();
+  await desktop.locator('.category-totals').waitFor();
+  assert.match(await desktop.locator('.category-totals').innerText(), /45,00/);
   await screenshot(desktop, 'Original-Desktop-Mit-Aufmass');
   record('Mobil erfasstes Projekt im Original-Desktopprogramm geoeffnet');
   assert.deepEqual(errors, []);
