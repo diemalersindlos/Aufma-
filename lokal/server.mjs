@@ -14,6 +14,13 @@ const ORIGIN = `http://127.0.0.1:${PORT}`;
 const ALLOWED = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 const DATA = path.resolve(process.env.AUFMASS_TEST_DATA ?? path.join(ROOT, 'Testdaten'));
 const storage = openStorage(DATA);
+// Node exposes a partial Navigator without onLine. The original Cloudflare
+// rendering path assumes an online browser when Navigator is absent. Supply
+// that same server-side default here; otherwise SSR says Offline while the
+// connected browser says Online and React reports hydration error 418.
+if (typeof globalThis.navigator !== 'undefined' && typeof globalThis.navigator.onLine !== 'boolean') {
+  Object.defineProperty(globalThis.navigator, 'onLine', { value: true, configurable: true });
+}
 let worker;
 try { ({ default: worker } = await import(pathToFileURL(path.join(ROOT, 'dist/server/index.js')).href)); }
 catch (error) {
