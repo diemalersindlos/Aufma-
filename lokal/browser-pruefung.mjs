@@ -53,14 +53,14 @@ try {
   record('Original-Speicherablauf Browser -> Projekt-API -> lokale SQLite-Datenbank');
   const list = await (await mobile.request.get(`${ROOT}/api/projects`)).json();
   const summary = list.projects.find((p) => p.title === title);
-  assert.ok(summary); assert.equal(summary.positionCount, 4);
+  assert.ok(summary); assert.equal(summary.positionCount, 1);
   const stored = await (await mobile.request.get(`${ROOT}/api/projects/${summary.id}`)).json();
   assert.equal(stored.state.measurements.length, 1);
   assert.equal(stored.state.measurements[0].areaOverride, 20);
   assert.equal(stored.state.measurements[0].perimeterOverride, 18);
   assert.equal(stored.state.meta.vobRuleConfirmed, false);
   await writeFile(`${DIR}/gespeichertes-testprojekt.json`, JSON.stringify(stored, null, 2));
-  record('Gespeicherte Originaldaten und vier Positionen nachgelesen');
+  record('Gespeicherten Originalraum und unveraenderten VOB-Pruefstatus nachgelesen');
   await mobile.getByRole('navigation', { name: 'Bereiche' }).getByRole('button', { name: /Prüfen/ }).click();
   const downloadEvent = mobile.waitForEvent('download');
   await mobile.getByRole('button', { name: /Handwerker-App/ }).click();
