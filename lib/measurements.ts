@@ -47,7 +47,7 @@ export type Measurement = {
   requestedIncludeWalls?: boolean;
   requestedIncludeSkirting?: boolean;
   manualFormula?: string;
-  areaSource?: "pdf-nrf" | "pdf-dimensions" | "pdf-scale" | "insta360-reference" | "laser-reference" | "special-geometry" | "freehand-sketch";
+  areaSource?: "pdf-manual" | "pdf-nrf" | "pdf-dimensions" | "pdf-scale" | "insta360-reference" | "laser-reference" | "special-geometry" | "freehand-sketch";
   captureSource?: {
     type: "insta360";
     panoramaId: string;

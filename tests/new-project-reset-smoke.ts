@@ -23,8 +23,7 @@ for (const resetCall of [
   "setScales({})",
   "setCalibrationDistance(\"\")",
   "setDrawingPoints([])",
-  "setAutoRoomHeight(2.5)",
-  "setAutoMinRoomArea(1)",
+  "setRoomDefaults({ height: 2.5, includeWalls: true, includeCeiling: true, includeFloor: false, includeSkirting: false })",
 ]) {
   assert.ok(desktopSource.includes(resetCall), `Beim neuen Projekt fehlt der Reset ${resetCall}.`);
 }

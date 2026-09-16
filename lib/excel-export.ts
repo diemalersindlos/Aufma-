@@ -252,6 +252,7 @@ function measurementKindLabel(measurement: Measurement) {
 }
 
 function measurementSourceLabel(measurement: Measurement) {
+  if (measurement.areaSource === "pdf-manual") return "Manuell im PDF eingezeichnet";
   if (measurement.areaSource === "pdf-nrf") return measurement.geometryStatus === "missing" || measurement.geometryStatus === "uncertain"
     ? "PDF-Raumstempel (NRF) · Kontur fehlt"
     : "PDF-Raumstempel (NRF)";
@@ -494,7 +495,9 @@ export async function buildArchitectExcel(input: ExportInput) {
       line.deduction,
       { formula: `MAX(0,G${rowNumber}-H${rowNumber})`, result: line.result },
       line.unit,
-      measurement?.areaSource === "pdf-nrf" && (line.category === "Boden" || line.category === "Decke")
+      measurement?.areaSource === "pdf-manual"
+        ? "Raumkontur manuell im PDF eingezeichnet; Berechnung aus geprüftem oder kalibriertem Planmaßstab."
+        : measurement?.areaSource === "pdf-nrf" && (line.category === "Boden" || line.category === "Decke")
         ? `Grundfläche unverändert aus digitalem PDF-Raumstempel (NRF).${measurement.geometryStatus === "missing" || measurement.geometryStatus === "uncertain" ? " Raumumfang nicht eindeutig bestimmt; Wand und Sockel nicht berechnet." : ""}`
         : measurement?.areaSource === "pdf-nrf" && (line.category === "Wand" || line.category === "Länge")
           ? "Umfang aus der dem PDF-Raumstempel zugeordneten Plangeometrie."
@@ -557,7 +560,9 @@ export async function buildArchitectExcel(input: ExportInput) {
     const row = roomSheet.getRow(rowNumber);
     row.values = [
       String(index + 1).padStart(3, "0"), room.page, room.name,
-      room.areaSource === "pdf-nrf"
+      room.areaSource === "pdf-manual"
+        ? "Manuell im PDF eingezeichnet"
+        : room.areaSource === "pdf-nrf"
         ? geometryMissing ? "PDF-Raumstempel (NRF) · KONTUR FEHLT" : "PDF-Raumstempel (NRF)"
         : room.areaSource === "pdf-dimensions"
           ? "PDF-Maßketten + Geometrie"
@@ -840,6 +845,7 @@ type AuditExportInput = Omit<ExportInput, "materials">;
 
 function auditLineState(measurement: Measurement | undefined, line: LineItem) {
   if (!measurement) return { source: "Keine Zuordnung", status: "PRÜFEN", detail: "Keine Geometriezuordnung vorhanden.", tone: "review" as const };
+  if (measurement.areaSource === "pdf-manual") return { source: "Manuelle PDF-Kontur", status: "EINGABE PRÜFEN", detail: "Raumkontur manuell im PDF eingezeichnet; Berechnung aus geprüftem oder kalibriertem Planmaßstab.", tone: "manual" as const };
   if (measurement.areaSource === "pdf-nrf") {
     const geometryMissing = measurement.geometryStatus === "missing" || measurement.geometryStatus === "uncertain";
     if (line.category === "Boden" || line.category === "Decke") {
@@ -861,6 +867,7 @@ function auditLineState(measurement: Measurement | undefined, line: LineItem) {
 }
 
 function auditRoomSource(room: Measurement) {
+  if (room.areaSource === "pdf-manual") return "Manuell im PDF eingezeichnet";
   if (room.areaSource === "pdf-nrf") return room.geometryStatus === "missing" || room.geometryStatus === "uncertain"
     ? "PDF-Raumstempel (NRF) · KONTUR FEHLT"
     : "PDF-Raumstempel (NRF)";

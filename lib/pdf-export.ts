@@ -108,6 +108,7 @@ function drawTopRect(page: PDFPage, x: number, top: number, width: number, heigh
 
 function sourceLabel(measurement: Measurement | undefined) {
   if (!measurement) return { source: "Keine Zuordnung", status: "PRÜFEN" };
+  if (measurement.areaSource === "pdf-manual") return { source: "Manuelle PDF-Kontur", status: "EINGABE PRÜFEN" };
   if (measurement.areaSource === "pdf-nrf") return {
     source: "PDF-Raumstempel (NRF)",
     status: measurement.geometryStatus === "missing" || measurement.geometryStatus === "uncertain"
