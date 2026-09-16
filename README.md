@@ -1,8 +1,22 @@
-# vinext-starter
+# MalerAufmaß Pro
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+MalerAufmaß Pro erstellt prüfbare Raumaufmaße aus PDF-Grundrissen und ergänzenden
+Laser-, Skizzen- oder 360°-Messungen. PDF-Räume werden bewusst **nicht automatisch
+erkannt**: Der Anwender zeichnet die tatsächliche Raumkontur selbst ein und erhält
+sofort Grundfläche, Umfang, Wandfläche, Decke, Boden und Sockelleiste.
+
+## Manueller PDF-Ablauf
+
+1. Eine oder mehrere PDF-Dateien laden.
+2. Den aus dem Plan gelesenen Maßstab prüfen oder eine bekannte Strecke kalibrieren.
+3. **Raum einzeichnen** wählen und die Raumecken nacheinander anklicken.
+4. Raumhöhe sowie gewünschte Leistungen auswählen und die Sofortberechnung prüfen.
+5. Raum übernehmen; Kontur und Aufmaß erscheinen in der rechten Liste.
+6. Über **Kontur bearbeiten** die Fläche verschieben oder einzelne Eckpunkte korrigieren.
+
+Die automatische PDF-Raumerkennung wurde in V46 vollständig entfernt. Der
+Planmaßstab darf weiterhin aus lesbarem PDF-Text übernommen werden, weil er nur
+die manuell gesetzten Punkte skaliert und keine Raumform erzeugt.
 
 ## Prerequisites
 

@@ -14,7 +14,8 @@
 ./.vinext/fonts/geist-mono-00e989178794/geist-mono-971fb274.woff2
 ./.vinext/fonts/geist-mono-00e989178794/geist-mono-f6b33328.woff2
 ./.vinext/fonts/geist-mono-00e989178794/style.css
-./ARBEITSSTAND_V45.md
+./ARBEITSSTAND_V46.md
+./CLAUDE.md
 ./PROJEKTUEBERGABE_ANDERER_ACCOUNT.md
 ./README.md
 ./TECHNISCHE_UEBERGABE.md
@@ -58,7 +59,6 @@
 ./examples/d1/app/api/notes/route.ts
 ./examples/d1/db/schema.ts
 ./lib/ai-measure-input.ts
-./lib/auto-detect.ts
 ./lib/bluetooth-laser.ts
 ./lib/excel-export.ts
 ./lib/freehand-sketch.ts
@@ -69,8 +69,6 @@
 ./lib/pdf-export.ts
 ./lib/pdf-plan-analysis.ts
 ./lib/pdf-render-quality.ts
-./lib/pdf-room-labels.ts
-./lib/pdf-text-mask.ts
 ./lib/pro-workflow.ts
 ./lib/project-audit.ts
 ./lib/project-state-validation.ts
@@ -110,6 +108,7 @@
 ./tests/editable-number-input-smoke.ts
 ./tests/freehand-sketch-smoke.ts
 ./tests/insta360-smoke.ts
+./tests/manual-room-workflow-smoke.ts
 ./tests/measurement-edge-smoke.ts
 ./tests/measurement-validation-matrix.ts
 ./tests/mobile-companion-smoke.ts
@@ -117,7 +116,6 @@
 ./tests/pdf-export-smoke.ts
 ./tests/pdf-navigation-smoke.ts
 ./tests/pdf-render-quality-smoke.ts
-./tests/pdf-room-matching-smoke.ts
 ./tests/pro-workflow-smoke.ts
 ./tests/project-audit-smoke.ts
 ./tests/project-management-smoke.ts

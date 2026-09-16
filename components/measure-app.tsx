@@ -36,7 +36,6 @@ import {
   Ruler,
   Save,
   Settings2,
-  Sparkles,
   Trash2,
   Undo2,
   UploadCloud,
@@ -68,26 +67,8 @@ import {
   type ProjectMeta,
 } from "@/lib/measurements";
 import { calculateOpeningRule, VOB_RULESET } from "@/lib/vob-rules";
-import { detectEnclosedRooms } from "@/lib/auto-detect";
-import { erasePdfTextItemsFromCanvas } from "@/lib/pdf-text-mask";
 import {
-  combinePdfRoomCandidateSets,
-  extractPdfRoomLabelsFromItems,
-  matchPdfRoomsToGeometry,
-} from "@/lib/pdf-room-labels";
-import {
-  adjustRoomToPdfDimensions,
-  attachPdfRoomNames,
-  classifyPdfPage,
-  extractPdfDimensions,
-  extractPdfDrawingAnchors,
-  extractPdfRoomHeights,
-  extractPdfRoomAnchors,
   extractScaleDenominator,
-  filterRoomsToFloorPlanRegions,
-  pointBelongsToFloorPlanRegion,
-  selectPdfRoomHeight,
-  type PdfPageKind,
   type PdfTextItemLike,
 } from "@/lib/pdf-plan-analysis";
 import {
@@ -149,10 +130,14 @@ type PdfPage = {
   getTextContent?: () => Promise<{ items: PdfTextItemLike[] }>;
 };
 type PdfDocument = { numPages: number; getPage: (page: number) => Promise<PdfPage> };
-type AutoScaleSource = "pdf" | "calibrated";
-type AutoSummary = { rooms: number; pages: number; area: number; method: "nrf" | "dimensions" | "geometry"; reviewRooms: number; roomHeights: number };
-type AutoPageKind = PdfPageKind;
 type ProjectSaveState = "idle" | "saving" | "saved" | "error";
+type RoomDefaults = {
+  height: number;
+  includeWalls: boolean;
+  includeCeiling: boolean;
+  includeFloor: boolean;
+  includeSkirting: boolean;
+};
 type GeometryDrag = {
   pointerId: number;
   mode: "outline" | "vertex";
@@ -183,7 +168,7 @@ function createInitialMeta(): ProjectMeta {
 const toolItems: { id: Tool; label: string; hint: string; icon: typeof MousePointer2 }[] = [
   { id: "select", label: "Auswahl", hint: "Position auswählen", icon: MousePointer2 },
   { id: "calibrate", label: "Maßstab", hint: "Bekannte Strecke messen", icon: Ruler },
-  { id: "room", label: "Raum", hint: "Boden, Decke und Wände", icon: Pentagon },
+  { id: "room", label: "Raum", hint: "Raumkontur im PDF einzeichnen", icon: Pentagon },
   { id: "area", label: "Fläche", hint: "Freie Fläche messen", icon: Layers3 },
   { id: "line", label: "Länge", hint: "Freie Länge messen", icon: Route },
   { id: "opening", label: "Abzug", hint: "Fenster oder Tür", icon: DoorOpen },
@@ -230,7 +215,7 @@ function measurementSourceSummary(measurement: Measurement) {
         : measurement.geometryStatus === "missing"
           ? " · Kontur fehlt"
           : "";
-  return `S. ${measurement.page}${measurement.areaSource === "pdf-nrf" ? " · PDF-NRF übernommen" : measurement.areaSource === "pdf-dimensions" ? " · PDF-Maße verwendet" : measurement.areaSource === "pdf-scale" ? " · Planmaßstab" : measurement.source === "auto" ? " · Auto erkannt" : ""}${geometrySummary}`;
+  return `S. ${measurement.page}${measurement.areaSource === "pdf-manual" ? " · manuell eingezeichnet" : measurement.areaSource === "pdf-nrf" ? " · PDF-NRF übernommen" : measurement.areaSource === "pdf-dimensions" ? " · PDF-Maße verwendet" : measurement.areaSource === "pdf-scale" ? " · Planmaßstab" : ""}${geometrySummary}`;
 }
 
 function compactPlanLabel(name: string, maximum = 21) {
@@ -308,13 +293,15 @@ function RoomOutlinePreview({ measurement, scale }: { measurement: Measurement; 
       ? "Rechteck aus den Lasermesswerten"
       : measurement.areaSource === "insta360-reference"
         ? "Raumform aus dem 360°-Aufmaß"
-        : "Berechnete Kontur im Grundriss";
+        : measurement.areaSource === "pdf-manual"
+          ? "Manuell im PDF-Grundriss eingezeichnet"
+          : "Berechnete Kontur im Grundriss";
 
   return (
     <section className="selected-room-outline-card" aria-label={`Berechneter Umriss von ${measurement.name}`}>
       <header>
         <i style={{ backgroundColor: measurement.color }} />
-        <span><small>BERECHNETER UMRISS</small><strong>{measurement.name}</strong></span>
+        <span><small>{measurement.areaSource === "pdf-manual" ? "EINGEZEICHNETER UMRISS" : "BERECHNETER UMRISS"}</small><strong>{measurement.name}</strong></span>
       </header>
       {outline.length >= 3 ? (
         <svg viewBox="0 0 220 116" role="img" aria-label={`Umriss von ${measurement.name}`}>
@@ -366,36 +353,29 @@ function cloneReview(review: ProjectReviewState = emptyProjectReview): ProjectRe
 }
 
 async function inspectPdfPages(document: PdfDocument) {
-  const scales: Record<number, number | null> = {};
-  const kinds: Record<number, AutoPageKind> = {};
-  const dimensionCounts: Record<number, number> = {};
-  const textItems: Record<number, PdfTextItemLike[]> = {};
+  const pageScales: Record<number, number> = {};
 
-  // Deliberately sequential: several simultaneous getTextContent calls can be
-  // unreliable on memory-constrained mobile Safari tabs.
+  // Deliberately sequential: simultaneous text extraction can be unreliable
+  // on memory-constrained mobile Safari tabs.
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     let items: PdfTextItemLike[] = [];
     try {
       const page = await document.getPage(pageNumber);
       const content = await page.getTextContent?.();
       items = content?.items ?? [];
-    } catch {
-      // A page with unreadable text can still be evaluated from its raster
-      // geometry and an entered or calibrated scale.
-    }
-    textItems[pageNumber] = items;
-    scales[pageNumber] = extractScaleDenominator(items);
-    kinds[pageNumber] = classifyPdfPage(items);
-    if (items.length) {
-      try {
-        const page = await document.getPage(pageNumber);
-        dimensionCounts[pageNumber] = extractPdfDimensions(items, page.getViewport({ scale: 1 })).length;
-      } catch {
-        dimensionCounts[pageNumber] = 0;
+      const denominator = extractScaleDenominator(items);
+      if (denominator) {
+        const unscaled = page.getViewport({ scale: 1 });
+        const targetWidth = Math.min(1180, Math.max(760, unscaled.width * 1.55));
+        const baseScale = targetWidth / unscaled.width;
+        pageScales[pageNumber] = denominator * 0.0254 / 72 / baseScale;
       }
-    } else dimensionCounts[pageNumber] = 0;
+    } catch {
+      // Pages without readable scale text stay uncalibrated until the user
+      // marks a known reference distance.
+    }
   }
-  return { scales, kinds, dimensionCounts, textItems };
+  return { pageScales };
 }
 
 export default function MeasureApp() {
@@ -410,7 +390,6 @@ export default function MeasureApp() {
   const panoramaObjectUrlsRef = useRef(new Map<string, string>());
   const undoStack = useRef<Measurement[][]>([]);
   const renderTask = useRef<{ cancel: () => void } | null>(null);
-  const pdfTextItemsRef = useRef<Record<number, PdfTextItemLike[]>>({});
   const navigationPointsRef = useRef(new Map<number, { x: number; y: number }>());
   const renderedDocumentRef = useRef<PdfDocument | null>(null);
   const renderedPageNumberRef = useRef(0);
@@ -446,8 +425,6 @@ export default function MeasureApp() {
   const [showInsta360, setShowInsta360] = useState(false);
   const [showProfessional, setShowProfessional] = useState(false);
   const [professionalTab, setProfessionalTab] = useState<ProfessionalTab>("laser");
-  const [resumeAutoAfterCalibration, setResumeAutoAfterCalibration] = useState(false);
-  const [showAutoModal, setShowAutoModal] = useState(false);
   const [showExcelModal, setShowExcelModal] = useState(false);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -459,20 +436,13 @@ export default function MeasureApp() {
   const [showProjectLibrary, setShowProjectLibrary] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isAutoDetecting, setIsAutoDetecting] = useState(false);
-  const [autoProgress, setAutoProgress] = useState("");
-  const [autoSummary, setAutoSummary] = useState<AutoSummary | null>(null);
-  const [autoScaleSource, setAutoScaleSource] = useState<AutoScaleSource>("pdf");
-  const [autoScaleDenominators, setAutoScaleDenominators] = useState<Record<number, number>>({});
-  const [autoScaleDetectedPages, setAutoScaleDetectedPages] = useState<Record<number, boolean>>({});
-  const [autoPageKinds, setAutoPageKinds] = useState<Record<number, AutoPageKind>>({});
-  const [autoDimensionCounts, setAutoDimensionCounts] = useState<Record<number, number>>({});
-  const [autoRoomHeight, setAutoRoomHeight] = useState(2.5);
-  const [autoMinRoomArea, setAutoMinRoomArea] = useState(1);
-  const [autoIncludeWalls, setAutoIncludeWalls] = useState(true);
-  const [autoIncludeCeiling, setAutoIncludeCeiling] = useState(true);
-  const [autoIncludeFloor, setAutoIncludeFloor] = useState(false);
-  const [autoIncludeSkirting, setAutoIncludeSkirting] = useState(false);
+  const [roomDefaults, setRoomDefaults] = useState<RoomDefaults>({
+    height: 2.5,
+    includeWalls: true,
+    includeCeiling: true,
+    includeFloor: false,
+    includeSkirting: false,
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [toast, setToast] = useState("");
   const [listMode, setListMode] = useState<"positions" | "totals">("positions");
@@ -841,29 +811,11 @@ export default function MeasureApp() {
       const sourceBytes = new Uint8Array(await file.arrayBuffer());
       const document = (await pdfjs.getDocument({ data: sourceBytes.slice() }).promise) as unknown as PdfDocument;
       const inspection = await inspectPdfPages(document);
-      const detectedPlanScales = inspection.scales;
-      const detectedPageKinds = inspection.kinds;
       const allPages = Array.from({ length: document.numPages }, (_, index) => index + 1);
-      const classifiedFloorPlans = allPages.filter((page) => detectedPageKinds[page] === "Grundriss");
-      const dimensionedPlanPages = allPages.filter((page) => (
-        detectedPageKinds[page] === "Planseite" && inspection.dimensionCounts[page] >= 3
-      ));
-      const suggestedPages = classifiedFloorPlans.length
-        ? classifiedFloorPlans
-        : dimensionedPlanPages.length
-          ? dimensionedPlanPages
-          : [1];
-      const scaleDenominators = Object.fromEntries(
-        allPages.map((page) => [page, detectedPlanScales[page] ?? 0]),
-      ) as Record<number, number>;
-      const detectedPages = Object.fromEntries(
-        allPages.map((page) => [page, Boolean(detectedPlanScales[page])]),
-      ) as Record<number, boolean>;
-      const detectedCount = allPages.filter((page) => detectedPages[page]).length;
+      const detectedScaleCount = Object.keys(inspection.pageScales).length;
       sourcePdfBytesRef.current = sourceBytes;
       pdfNeedsUploadRef.current = !restoredState;
       setPdfDocument(document);
-      pdfTextItemsRef.current = inspection.textItems;
       setFileName(file.name);
       setSourceFileNames(restoredState?.sourceFileNames?.length ? restoredState.sourceFileNames : selectedFileNames);
       if (!restoredState) {
@@ -877,12 +829,6 @@ export default function MeasureApp() {
       setZoom(1);
       setSelectedId(null);
       setTool("select");
-      setAutoSummary(null);
-      setAutoScaleDenominators(scaleDenominators);
-      setAutoScaleDetectedPages(detectedPages);
-      setAutoPageKinds(detectedPageKinds);
-      setAutoDimensionCounts(inspection.dimensionCounts);
-      setAutoScaleSource("pdf");
       if (restoredState) {
         panoramaFilesRef.current.clear();
         panoramaObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -893,27 +839,26 @@ export default function MeasureApp() {
         setMeasurements(normalizeMeasurementColors(normalizeLegacyPdfRoomGeometry(Array.isArray(restoredState.measurements) ? restoredState.measurements : [])));
         setMaterials(restoredState.materials ? cloneMaterials(restoredState.materials) : cloneMaterials());
         setPanoramas(restoredState.panoramas ?? []);
-        setAutoRoomHeight(restoredState.autoSettings?.roomHeight ?? 2.5);
-        setAutoMinRoomArea(restoredState.autoSettings?.minRoomArea ?? 1);
-        setAutoIncludeWalls(restoredState.autoSettings?.includeWalls ?? true);
-        setAutoIncludeCeiling(restoredState.autoSettings?.includeCeiling ?? true);
-        setAutoIncludeFloor(restoredState.autoSettings?.includeFloor ?? false);
-        setAutoIncludeSkirting(restoredState.autoSettings?.includeSkirting ?? false);
+        setRoomDefaults({
+          height: restoredState.autoSettings?.roomHeight ?? 2.5,
+          includeWalls: restoredState.autoSettings?.includeWalls ?? true,
+          includeCeiling: restoredState.autoSettings?.includeCeiling ?? true,
+          includeFloor: restoredState.autoSettings?.includeFloor ?? false,
+          includeSkirting: restoredState.autoSettings?.includeSkirting ?? false,
+        });
         setProjectStatus(restoredState.status ?? "draft");
         setProjectSaveState("saved");
-        setShowAutoModal(false);
         showToast("Projekt und zugehörige Grundriss-PDF wurden geladen.");
       } else {
-        setIncludedPages(suggestedPages.length ? suggestedPages : allPages);
-        setScales({});
+        setIncludedPages(allPages);
+        setScales(inspection.pageScales);
         setMeasurements((current) => current.filter((measurement) => ["insta360-reference", "laser-reference", "special-geometry", "freehand-sketch"].includes(measurement.areaSource ?? "")));
         setProjectStatus("draft");
         setProjectSaveState("idle");
-        setShowAutoModal(true);
         const fileSummary = selectedFileNames.length > 1 ? `${selectedFileNames.length} PDF-Dateien zusammengeführt · ` : "";
-        showToast(detectedCount === document.numPages
-          ? `${fileSummary}${suggestedPages.length} relevante ${suggestedPages.length === 1 ? "Seite" : "Seiten"} vorausgewählt.`
-          : `${fileSummary}${suggestedPages.length} Plan-${suggestedPages.length === 1 ? "Seite" : "Seiten"} vorausgewählt, Maßstab bitte prüfen.`);
+        showToast(detectedScaleCount
+          ? `${fileSummary}Maßstab auf ${detectedScaleCount} ${detectedScaleCount === 1 ? "Seite" : "Seiten"} gelesen · jetzt „Raum einzeichnen“ wählen.`
+          : `${fileSummary}PDF geladen · vor dem Einzeichnen bitte den Maßstab kalibrieren.`);
       }
     } catch (error) {
       console.error("PDF öffnen", error);
@@ -967,7 +912,7 @@ export default function MeasureApp() {
 
   function openPdfSelection() {
     if (pdfDocument && measurements.length) {
-      const proceed = window.confirm("Neue PDF-Dateien öffnen? Automatisch erkannte und manuell im Plan gesetzte Positionen werden für den neuen Plansatz zurückgesetzt.");
+      const proceed = window.confirm("Neue PDF-Dateien öffnen? Alle im bisherigen Plansatz eingezeichneten Positionen werden zurückgesetzt.");
       if (!proceed) return;
     }
     fileInputRef.current?.click();
@@ -978,285 +923,6 @@ export default function MeasureApp() {
     setIsDragging(false);
     const files = Array.from(event.dataTransfer.files ?? []);
     if (files.length) void loadPdfSelection(files);
-  }
-
-  async function runAutoMeasurement() {
-    if (!pdfDocument) return;
-    if (!autoIncludeWalls && !autoIncludeCeiling && !autoIncludeFloor && !autoIncludeSkirting) {
-      showToast("Bitte mindestens eine Mengenart auswählen.");
-      return;
-    }
-    if (!Number.isFinite(autoRoomHeight) || autoRoomHeight <= 0) {
-      showToast("Bitte eine gültige Raumhöhe eingeben.");
-      return;
-    }
-    if (autoScaleSource === "calibrated" && !pageScale) {
-      setShowAutoModal(false);
-      setTool("calibrate");
-      showToast("Für das Auto-Aufmaß zuerst zwei Punkte einer bekannten Strecke anklicken.");
-      return;
-    }
-
-    const targetPages = autoScaleSource === "calibrated"
-      ? [pageNumber]
-      : [...includedPages].sort((left, right) => left - right);
-    if (!targetPages.length) {
-      showToast("Bitte mindestens eine PDF-Seite für das Aufmaß auswählen.");
-      return;
-    }
-    if (autoScaleSource === "pdf") {
-      const missingScalePage = targetPages.find((page) => !Number.isFinite(autoScaleDenominators[page]) || autoScaleDenominators[page] <= 0);
-      if (missingScalePage) {
-        showToast(`Bitte den Planmaßstab für Seite ${missingScalePage} eingeben.`);
-        return;
-      }
-    }
-    setIsAutoDetecting(true);
-    setAutoProgress("Grundriss wird vorbereitet …");
-
-    try {
-      const generated: Measurement[] = [];
-      const generatedScales: Record<number, number> = {};
-      let detectedArea = 0;
-      let processedPages = 0;
-      let nrfRoomCount = 0;
-      let dimensionRoomCount = 0;
-      let geometryReviewRoomCount = 0;
-      let detectedRoomHeightCount = 0;
-      const failedPages: number[] = [];
-      const skippedDrawingPages: number[] = [];
-
-      for (let pageIndex = 0; pageIndex < targetPages.length; pageIndex += 1) {
-        const currentPageNumber = targetPages[pageIndex];
-        setAutoProgress(`Räume werden erkannt · Seite ${pageIndex + 1} von ${targetPages.length}`);
-        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-        try {
-          if (["Schnitt", "Ansicht"].includes(autoPageKinds[currentPageNumber])) {
-            skippedDrawingPages.push(currentPageNumber);
-            continue;
-          }
-
-          const page = await pdfDocument.getPage(currentPageNumber);
-          const unscaled = page.getViewport({ scale: 1 });
-          const targetWidth = Math.min(1180, Math.max(760, unscaled.width * 1.55));
-          const baseScale = targetWidth / unscaled.width;
-          const fullViewport = page.getViewport({ scale: baseScale });
-          const highPrecisionAnalysisWidth = window.innerWidth >= 900 ? 1600 : 1180;
-          const analysisScale = Math.max(1, Math.min(1.6, highPrecisionAnalysisWidth / fullViewport.width));
-          const analysisViewport = page.getViewport({ scale: baseScale * analysisScale });
-          const metersPerCssPixel = autoScaleSource === "calibrated"
-            ? scales[currentPageNumber]
-            : autoScaleDenominators[currentPageNumber] * 0.0254 / 72 / baseScale;
-          if (!metersPerCssPixel) {
-            failedPages.push(currentPageNumber);
-            continue;
-          }
-          const metersPerAnalysisPixel = metersPerCssPixel / analysisScale;
-          const imageWidth = Math.max(1, Math.floor(analysisViewport.width));
-          const imageHeight = Math.max(1, Math.floor(analysisViewport.height));
-
-          let items = pdfTextItemsRef.current[currentPageNumber] ?? [];
-          if (!items.length) {
-            try {
-              items = (await page.getTextContent?.())?.items ?? [];
-              pdfTextItemsRef.current[currentPageNumber] = items;
-            } catch {
-              items = [];
-            }
-          }
-          const drawingAnchors = extractPdfDrawingAnchors(items, analysisViewport);
-          const pdfRoomLabels = extractPdfRoomLabelsFromItems(items, analysisViewport)
-            .filter((label) => label.area >= Math.max(0.25, autoMinRoomArea))
-            .filter((label) => pointBelongsToFloorPlanRegion(label.anchor, drawingAnchors, imageWidth, imageHeight));
-          const pdfDimensions = extractPdfDimensions(items, analysisViewport)
-            .filter((dimension) => pointBelongsToFloorPlanRegion(dimension.anchor, drawingAnchors, imageWidth, imageHeight));
-          const pdfRoomHeights = extractPdfRoomHeights(items, analysisViewport)
-            .filter((height) => pointBelongsToFloorPlanRegion(height.anchor, drawingAnchors, imageWidth, imageHeight));
-          const pdfRoomAnchors = pdfRoomLabels.length ? [] : extractPdfRoomAnchors(items, analysisViewport)
-            .filter((anchor) => !/\b(?:Freisitz|Balkon|Terrasse|Loggia|Außenbereich)\b|^ca\.?\s*:/i.test(anchor.name))
-            .filter((anchor) => pointBelongsToFloorPlanRegion(anchor.anchor, drawingAnchors, imageWidth, imageHeight));
-
-          let detectedRooms: ReturnType<typeof detectEnclosedRooms> = [];
-          try {
-            const analysisCanvas = document.createElement("canvas");
-            analysisCanvas.width = imageWidth;
-            analysisCanvas.height = imageHeight;
-            const analysisContext = analysisCanvas.getContext("2d", { willReadFrequently: true })
-              ?? analysisCanvas.getContext("2d");
-            if (!analysisContext) throw new Error("Canvas-Kontext nicht verfügbar");
-            analysisContext.fillStyle = "#ffffff";
-            analysisContext.fillRect(0, 0, imageWidth, imageHeight);
-            await page.render({ canvasContext: analysisContext, viewport: analysisViewport }).promise;
-            erasePdfTextItemsFromCanvas(items, analysisViewport, analysisContext);
-            const image = analysisContext.getImageData(0, 0, imageWidth, imageHeight);
-            const roomCandidates = [0.45, 0.6, 0.72].map((gapClosureMeters) => filterRoomsToFloorPlanRegions(
-              detectEnclosedRooms(
-                image.data,
-                image.width,
-                image.height,
-                {
-                  metersPerPixel: metersPerAnalysisPixel,
-                  minArea: Math.max(0.25, autoMinRoomArea),
-                  gapClosureMeters,
-                },
-              ),
-              drawingAnchors,
-              image.width,
-              image.height,
-            ));
-            detectedRooms = pdfRoomLabels.length
-              ? combinePdfRoomCandidateSets(roomCandidates)
-              : roomCandidates.sort((left, right) => {
-                const area = (rooms: typeof left) => rooms.reduce((sum, room) => sum + room.pixelArea, 0);
-                return area(right) - area(left) || right.length - left.length;
-              })[0] ?? [];
-            analysisCanvas.width = 1;
-            analysisCanvas.height = 1;
-          } catch {
-            // Digital NRF labels can still produce a complete floor/ceiling
-            // takeoff when raster geometry is unavailable on the device.
-          }
-
-          const matchedRooms = pdfRoomLabels.length
-            ? matchPdfRoomsToGeometry(
-              pdfRoomLabels,
-              detectedRooms,
-              metersPerAnalysisPixel,
-            )
-            : [];
-          const dimensionAdjustedRooms = !matchedRooms.length
-            ? detectedRooms.map((room) => adjustRoomToPdfDimensions(
-              room,
-              pdfDimensions,
-              metersPerAnalysisPixel,
-              imageWidth,
-              imageHeight,
-            ))
-            : [];
-          const namedDimensionRooms = pdfRoomAnchors.length
-            ? attachPdfRoomNames(dimensionAdjustedRooms, pdfRoomAnchors, metersPerAnalysisPixel)
-            : dimensionAdjustedRooms;
-          const pageRooms = matchedRooms.length
-            ? matchedRooms
-            : namedDimensionRooms;
-          if (!pageRooms.length) {
-            failedPages.push(currentPageNumber);
-            continue;
-          }
-
-          generatedScales[currentPageNumber] = metersPerCssPixel;
-          processedPages += 1;
-          pageRooms.forEach((room, roomIndex) => {
-            const exactLabelRoom = "area" in room;
-            const usesDimensions = "dimensionMatches" in room && room.dimensionMatches > 0;
-            const roomReference = "reference" in room && typeof room.reference === "string" ? room.reference : "";
-            const roomArea = exactLabelRoom
-              ? room.area
-              : room.pixelArea * metersPerAnalysisPixel * metersPerAnalysisPixel;
-            const geometryStatus = exactLabelRoom && "geometryStatus" in room ? room.geometryStatus : undefined;
-            const hasUsableRoomContour = !exactLabelRoom || geometryStatus === "matched";
-            const detectedRoomHeight = selectPdfRoomHeight(room, pdfRoomHeights, metersPerAnalysisPixel);
-            detectedArea += roomArea;
-            if (exactLabelRoom) nrfRoomCount += 1;
-            else if (usesDimensions) dimensionRoomCount += 1;
-            if (exactLabelRoom && !hasUsableRoomContour) geometryReviewRoomCount += 1;
-            if (detectedRoomHeight) detectedRoomHeightCount += 1;
-            generated.push({
-              id: createId("auto-room"),
-              kind: "room",
-              name: exactLabelRoom
-                ? `${roomReference ? `${roomReference} · ` : ""}${room.name}`
-                : "name" in room
-                  ? `${roomReference ? `${roomReference} · ` : ""}${String(room.name)}`
-                : pageCount > 1
-                  ? `Raum ${currentPageNumber}.${String(roomIndex + 1).padStart(2, "0")}`
-                  : `Raum ${String(roomIndex + 1).padStart(2, "0")}`,
-              page: currentPageNumber,
-              points: room.points.map((point) => ({ x: point.x / analysisScale, y: point.y / analysisScale })),
-              color: nextRoomColor([...measurements, ...generated]),
-              height: detectedRoomHeight?.value ?? autoRoomHeight,
-              heightSource: detectedRoomHeight ? "pdf-room" : "project-default",
-              heightNote: detectedRoomHeight
-                ? `Automatisch aus der Grundrissangabe „${detectedRoomHeight.raw}“ erkannt.`
-                : `Keine eindeutige Höhenangabe im Raum gefunden; Standardhöhe ${formatNumber(autoRoomHeight)} m verwendet.`,
-              quantity: 1,
-              factor: 1,
-              includeFloor: autoIncludeFloor,
-              includeCeiling: autoIncludeCeiling,
-              includeWalls: hasUsableRoomContour ? autoIncludeWalls : false,
-              includeSkirting: hasUsableRoomContour ? autoIncludeSkirting : false,
-              requestedIncludeWalls: exactLabelRoom && !hasUsableRoomContour ? autoIncludeWalls : undefined,
-              requestedIncludeSkirting: exactLabelRoom && !hasUsableRoomContour ? autoIncludeSkirting : undefined,
-              openings: [],
-              source: "auto",
-              areaOverride: exactLabelRoom ? room.area : undefined,
-              perimeterOverride: exactLabelRoom ? room.perimeter : usesDimensions && "perimeterMeters" in room ? room.perimeterMeters : undefined,
-              geometryStatus: exactLabelRoom ? geometryStatus : undefined,
-              geometryNote: exactLabelRoom && "geometryReason" in room ? room.geometryReason : undefined,
-              labelAnchor: exactLabelRoom && "anchor" in room
-                ? { x: room.anchor.x / analysisScale, y: room.anchor.y / analysisScale }
-                : undefined,
-              areaSource: exactLabelRoom ? "pdf-nrf" : usesDimensions ? "pdf-dimensions" : "pdf-scale",
-              confidence: room.confidence,
-              visible: true,
-              createdAt: new Date().toISOString(),
-            });
-          });
-        } catch (error) {
-          console.error(`Auto-Aufmaß Seite ${currentPageNumber}`, error);
-          failedPages.push(currentPageNumber);
-        }
-      }
-
-      if (!generated.length) {
-        const pageHint = failedPages.length ? ` auf Seite ${failedPages.join(", ")}` : "";
-        showToast(`Keine auswertbare Raumgeometrie${pageHint} erkannt. Maßstab prüfen oder Seite kalibrieren.`);
-        return;
-      }
-
-      const targetPageSet = new Set(targetPages);
-      setScales((current) => ({ ...current, ...generatedScales }));
-      commitMeasurements((current) => [
-        ...current.filter((measurement) => !(measurement.source === "auto" && targetPageSet.has(measurement.page))),
-        ...generated,
-      ]);
-      setSelectedId(null);
-      setExpandedId(null);
-      setListMode("positions");
-      setTool("select");
-      setAutoSummary({
-        rooms: generated.length,
-        pages: processedPages,
-        area: detectedArea,
-        method: nrfRoomCount ? "nrf" : dimensionRoomCount ? "dimensions" : "geometry",
-        reviewRooms: geometryReviewRoomCount,
-        roomHeights: detectedRoomHeightCount,
-      });
-      setShowAutoModal(false);
-      setMaterialInputsConfirmed(false);
-      setShowExcelModal(true);
-      const sourceText = nrfRoomCount
-        ? `${nrfRoomCount} NRF-Flächen übernommen`
-        : dimensionRoomCount
-          ? `${dimensionRoomCount} Räume an PDF-Maße angepasst`
-          : `${generated.length} Räume aus Planmaßstab ermittelt`;
-      const warning = failedPages.length || skippedDrawingPages.length
-        ? ` · nicht ausgewertet: ${[...new Set([...failedPages, ...skippedDrawingPages])].join(", ")}`
-        : "";
-      const geometryWarning = geometryReviewRoomCount
-        ? ` · ${geometryReviewRoomCount} Kontur${geometryReviewRoomCount === 1 ? "" : "en"} manuell prüfen; Wand/Sockel noch nicht berechnet`
-        : "";
-      const heightSummary = detectedRoomHeightCount
-        ? ` · ${detectedRoomHeightCount} Raumhöhe${detectedRoomHeightCount === 1 ? "" : "n"} aus PDF erkannt`
-        : " · keine eindeutige Raumhöhe im Grundriss; Standardwert verwendet";
-      showToast(`${sourceText}${heightSummary}${geometryWarning} · Excel vorbereitet${warning}`);
-    } catch (error) {
-      console.error("Auto-Aufmaß", error);
-      showToast("Das Auto-Aufmaß wurde beendet. Bitte Maßstab und Seitenauswahl prüfen.");
-    } finally {
-      setIsAutoDetecting(false);
-      setAutoProgress("");
-    }
   }
 
   function pointFromClient(clientX: number, clientY: number): Point {
@@ -1439,17 +1105,8 @@ export default function MeasureApp() {
     setScales((current) => ({ ...current, [pageNumber]: known / pixels }));
     setShowCalibrationModal(false);
     setCalibrationPoints([]);
-    if (resumeAutoAfterCalibration) {
-      setResumeAutoAfterCalibration(false);
-      setAutoScaleSource("calibrated");
-      setIncludedPages([pageNumber]);
-      setShowAutoModal(true);
-      setTool("select");
-      showToast(`Seite ${pageNumber} ist kalibriert · Auto-Aufmaß kann starten.`);
-    } else {
-      setTool("room");
-      showToast(`Seite ${pageNumber} ist kalibriert – du kannst jetzt messen.`);
-    }
+    setTool("room");
+    showToast(`Seite ${pageNumber} ist kalibriert – jetzt die Raumecken im Plan anklicken.`);
   }
 
   function saveMeasurement(values: {
@@ -1485,10 +1142,23 @@ export default function MeasureApp() {
       lineCategory: kind === "line" ? values.category : undefined,
       openings: kind === "room" ? [] : undefined,
       source: "manual",
+      areaSource: kind === "room" ? "pdf-manual" : undefined,
+      geometryStatus: kind === "room" ? "manual" : undefined,
+      geometryNote: kind === "room" ? "Raumkontur wurde vom Benutzer direkt im PDF-Grundriss eingezeichnet." : undefined,
+      labelAnchor: kind === "room" ? polygonCentroid(pendingGeometry.points) : undefined,
       visible: true,
       createdAt: new Date().toISOString(),
     };
     commitMeasurements((current) => [...current, measurement]);
+    if (kind === "room") {
+      setRoomDefaults({
+        height: values.height,
+        includeWalls: values.includeWalls,
+        includeCeiling: values.includeCeiling,
+        includeFloor: values.includeFloor,
+        includeSkirting: values.includeSkirting,
+      });
+    }
     setSelectedId(measurement.id);
     setExpandedId(measurement.id);
     setPendingGeometry(null);
@@ -1737,12 +1407,12 @@ export default function MeasureApp() {
       panoramas,
       professional: { review: cloneReview(projectReview) },
       autoSettings: {
-        roomHeight: autoRoomHeight,
-        minRoomArea: autoMinRoomArea,
-        includeWalls: autoIncludeWalls,
-        includeCeiling: autoIncludeCeiling,
-        includeFloor: autoIncludeFloor,
-        includeSkirting: autoIncludeSkirting,
+        roomHeight: roomDefaults.height,
+        minRoomArea: 1,
+        includeWalls: roomDefaults.includeWalls,
+        includeCeiling: roomDefaults.includeCeiling,
+        includeFloor: roomDefaults.includeFloor,
+        includeSkirting: roomDefaults.includeSkirting,
       },
     };
   }
@@ -1855,12 +1525,13 @@ export default function MeasureApp() {
     setMaterials(state.materials ? cloneMaterials(state.materials) : cloneMaterials());
     setPanoramas(state.panoramas ?? []);
     setProjectReview(state.professional?.review ? cloneReview(state.professional.review) : cloneReview());
-    setAutoRoomHeight(state.autoSettings?.roomHeight ?? 2.5);
-    setAutoMinRoomArea(state.autoSettings?.minRoomArea ?? 1);
-    setAutoIncludeWalls(state.autoSettings?.includeWalls ?? true);
-    setAutoIncludeCeiling(state.autoSettings?.includeCeiling ?? true);
-    setAutoIncludeFloor(state.autoSettings?.includeFloor ?? false);
-    setAutoIncludeSkirting(state.autoSettings?.includeSkirting ?? false);
+    setRoomDefaults({
+      height: state.autoSettings?.roomHeight ?? 2.5,
+      includeWalls: state.autoSettings?.includeWalls ?? true,
+      includeCeiling: state.autoSettings?.includeCeiling ?? true,
+      includeFloor: state.autoSettings?.includeFloor ?? false,
+      includeSkirting: state.autoSettings?.includeSkirting ?? false,
+    });
     setProjectStatus(state.status ?? "draft");
     setProjectSaveState("saved");
     setSelectedId(null);
@@ -1963,20 +1634,7 @@ export default function MeasureApp() {
     setPendingOpeningPoint(null);
     setCalibrationPoints([]);
     setCalibrationDistance("");
-    setAutoSummary(null);
-    setAutoScaleSource("pdf");
-    setAutoScaleDenominators({});
-    setAutoScaleDetectedPages({});
-    setAutoPageKinds({});
-    setAutoDimensionCounts({});
-    setAutoRoomHeight(2.5);
-    setAutoMinRoomArea(1);
-    setAutoIncludeWalls(true);
-    setAutoIncludeCeiling(true);
-    setAutoIncludeFloor(false);
-    setAutoIncludeSkirting(false);
-    setResumeAutoAfterCalibration(false);
-    setShowAutoModal(false);
+    setRoomDefaults({ height: 2.5, includeWalls: true, includeCeiling: true, includeFloor: false, includeSkirting: false });
     setProjectStatus("draft");
     setProjectSaveState("idle");
     setShowProjectLibrary(false);
@@ -2207,6 +1865,25 @@ export default function MeasureApp() {
   const liveArea = pageScale && drawingPoints.length >= 2 && cursorPoint
     ? polygonPixels([...drawingPoints, cursorPoint]) * pageScale * pageScale
     : 0;
+  const liveRoomPerimeter = pageScale && livePoints.length >= 3
+    ? polylinePixels(livePoints, true) * pageScale
+    : 0;
+  const roomDraftSegments = tool === "room" && pageScale
+    ? livePoints.slice(1).map((point, index) => {
+      const start = livePoints[index];
+      return {
+        key: `${index}-${start.x}-${start.y}-${point.x}-${point.y}`,
+        x: (start.x + point.x) / 2,
+        y: (start.y + point.y) / 2,
+        length: distance(start, point) * pageScale,
+      };
+    }).concat(livePoints.length >= 3 ? [{
+      key: "closing-segment",
+      x: (livePoints[livePoints.length - 1].x + livePoints[0].x) / 2,
+      y: (livePoints[livePoints.length - 1].y + livePoints[0].y) / 2,
+      length: distance(livePoints[livePoints.length - 1], livePoints[0]) * pageScale,
+    }] : [])
+    : [];
 
   return (
     <div className="app-shell">
@@ -2283,11 +1960,11 @@ export default function MeasureApp() {
               {pdfDocument && (
                 <>
                   <button className="mini-button" onClick={openPdfSelection} title="Eine oder mehrere PDF-Dateien öffnen"><UploadCloud size={15} /> PDFs öffnen</button>
-                  <button className="mini-button auto-button" onClick={() => setShowAutoModal(true)}><Sparkles size={15} /> Seiten & Mengen · {includedPages.length}/{pageCount}</button>
+                  <button className="mini-button room-draw-button" onClick={() => selectTool("room")}><Pentagon size={15} /> Raum einzeichnen</button>
                   <button className="mini-button audit-mini-button" onClick={openAudit} disabled={!rows.length} title="Prüfbares Aufmaß öffnen"><ClipboardCheck size={15} /><span>Prüfbares Aufmaß</span></button>
                   <div className={`scale-status ${pageScale ? "ready" : "missing"}`}>
                     {pageScale ? <Check size={14} /> : <AlertTriangle size={14} />}
-                    {pageScale ? `Kalibriert · 1 px = ${formatNumber(pageScale * 1000, 3)} mm` : "Maßstab fehlt"}
+                    {pageScale ? `Maßstab aktiv · 1 px = ${formatNumber(pageScale * 1000, 3)} mm` : "Maßstab fehlt"}
                   </div>
                   <span className="render-quality-badge" title="PDF wird bei jeder Zoomstufe in Geräteauflösung nachgerendert" aria-label="Scharfe HD-Darstellung aktiv">HD</span>
                   <button className="mini-button" onClick={() => selectTool("calibrate")}><Ruler size={15} /> Neu kalibrieren</button>
@@ -2320,14 +1997,6 @@ export default function MeasureApp() {
             {tool === "select" && selected?.kind === "room" && (
               <div className="selected-room-outline-layer" aria-live="polite">
                 <RoomOutlinePreview measurement={selected} scale={scales[selected.page]} />
-              </div>
-            )}
-            {autoSummary && pdfDocument && (
-              <div className="auto-summary-banner">
-                <span className="auto-summary-icon"><Sparkles size={17} /></span>
-                <span><strong>Auto-Aufmaß erstellt</strong><small>{autoSummary.rooms} Räume · {autoSummary.pages} {autoSummary.pages === 1 ? "Seite" : "Seiten"} · {formatNumber(autoSummary.area)} m² · {autoSummary.method === "nrf" ? "PDF-NRF" : autoSummary.method === "dimensions" ? "PDF-Maßketten" : "Planmaßstab"}{autoSummary.roomHeights ? ` · ${autoSummary.roomHeights}/${autoSummary.rooms} Höhen erkannt` : " · Standard-Raumhöhe"}{autoSummary.reviewRooms ? ` · ${autoSummary.reviewRooms} Konturen prüfen` : ""} · Raum rechts auswählen</small></span>
-                <button className="audit-summary-button" onClick={openAudit}><ClipboardCheck size={14} /> Prüfen</button>
-                <button className="summary-close-button" onClick={() => setAutoSummary(null)} aria-label="Hinweis schließen"><X size={15} /></button>
               </div>
             )}
             {!pdfDocument ? (
@@ -2492,13 +2161,16 @@ export default function MeasureApp() {
                           <polygon points={cursorPoint ? `${drawingPath} ${cursorPoint.x},${cursorPoint.y}` : drawingPath} />
                         )}
                         {drawingPoints.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={index === 0 ? 5.5 : 4.5} />)}
+                        {roomDraftSegments.map((segment) => (
+                          <text key={segment.key} className="draft-segment-label" x={segment.x} y={segment.y - 7} textAnchor="middle">{formatNumber(segment.length)} m</text>
+                        ))}
                       </g>
                     )}
                   </svg>
 
                   {drawingPoints.length > 0 && cursorPoint && (
                     <div className="live-readout" style={{ left: cursorPoint.x + 14, top: cursorPoint.y + 14 }}>
-                      {tool === "line" ? `${formatNumber(liveLength)} m` : `${formatNumber(liveArea)} m²`}
+                      {tool === "line" ? `${formatNumber(liveLength)} m` : tool === "room" ? `${formatNumber(liveArea)} m² · ${formatNumber(liveRoomPerimeter)} m Umfang` : `${formatNumber(liveArea)} m²`}
                     </div>
                   )}
                   </div>
@@ -2508,15 +2180,16 @@ export default function MeasureApp() {
 
             {pdfDocument && drawingPoints.length > 0 && (
               <div className="drawing-actions">
-                <span>{geometryEditingId && drawingPoints.length >= 3 ? <><Move size={14} /> Fläche oder Eckpunkte ziehen</> : geometryEditingId ? "Raumkontur neu setzen" : tool === "line" ? "Weitere Punkte setzen" : "Ecken des Bereichs setzen"}</span>
+                <span>{geometryEditingId && drawingPoints.length >= 3 ? <><Move size={14} /> Fläche oder Eckpunkte ziehen</> : geometryEditingId ? "Raumkontur neu setzen" : tool === "room" ? "Raumecken setzen · ersten Punkt anklicken oder Abschließen" : tool === "line" ? "Weitere Punkte setzen" : "Ecken des Bereichs setzen"}</span>
                 <button onClick={cancelDrawing}>Abbrechen</button>
+                {!geometryEditingId && drawingPoints.length > 1 && <button onClick={() => setDrawingPoints((points) => points.slice(0, -1))}><Undo2 size={14} /> Letzten Punkt löschen</button>}
                 {geometryEditingId && drawingPoints.length >= 3 && <button onClick={() => { geometryDragRef.current = null; setDrawingPoints([]); }}>Neu zeichnen</button>}
                 <button className="finish" onClick={finishDrawing}><Check size={15} /> Abschließen</button>
               </div>
             )}
 
-            {(isLoading || isAutoDetecting) && (
-              <div className="loading-overlay"><LoaderCircle className="spin" size={28} /><span>{isAutoDetecting ? autoProgress || "Auto-Aufmaß wird berechnet …" : "Grundriss wird geladen …"}</span></div>
+            {isLoading && (
+              <div className="loading-overlay"><LoaderCircle className="spin" size={28} /><span>Grundriss wird geladen …</span></div>
             )}
           </div>
 
@@ -2539,7 +2212,7 @@ export default function MeasureApp() {
           )}
 
           <div className="page-footer">
-            <span>{tool === "calibrate" ? "Zwei Punkte einer bekannten Strecke anklicken" : tool === "select" ? "Mit Mausziehen oder einem Finger verschieben · Mausrad scrollt · Strg/⌘ + Mausrad zoomt" : "Punkte setzen · Enter schließt ab · Esc bricht ab"}</span>
+            <span>{tool === "calibrate" ? "Zwei Punkte einer bekannten Strecke anklicken" : tool === "room" ? "Raum manuell einzeichnen: alle Ecken nacheinander anklicken · Enter schließt ab · Esc bricht ab" : tool === "select" ? "Mit Mausziehen oder einem Finger verschieben · Mausrad scrollt · Strg/⌘ + Mausrad zoomt" : "Punkte setzen · Enter schließt ab · Esc bricht ab"}</span>
             {pdfDocument && (
               <div className="page-switcher">
                 <button onClick={() => changePage(pageNumber - 1)} disabled={pageNumber === 1}><ChevronLeft size={16} /></button>
@@ -2569,7 +2242,7 @@ export default function MeasureApp() {
                 <div className="no-results">
                   <div><Ruler size={21} /></div>
                   <h3>{measurements.length ? "Keine Positionen auf den ausgewählten Seiten" : "Noch keine Mengen"}</h3>
-                  <p>{measurements.length ? "Öffne das Auto-Aufmaß und wähle die gewünschten PDF-Seiten aus." : "Lade einen Grundriss, starte das Auto-Aufmaß oder erfasse einen Raum über Insta360."}</p>
+                  <p>{measurements.length ? "Wechsle zur gewünschten PDF-Seite und zeichne dort weitere Räume ein." : "Lade einen Grundriss, kalibriere bei Bedarf den Maßstab und zeichne den ersten Raum ein."}</p>
                 </div>
               ) : includedMeasurements.map((measurement, index) => {
                 const measurementRows = rows.filter((row) => row.measurementId === measurement.id);
@@ -2630,8 +2303,8 @@ export default function MeasureApp() {
                           );
                         })}
                         <div className="card-actions">
-                          {measurement.kind === "room" && measurement.source === "auto" && ["pdf-nrf", "pdf-dimensions", "pdf-scale"].includes(measurement.areaSource ?? "") && (
-                            <button className="geometry-action" onClick={() => startGeometryCorrection(measurement)}><Pentagon size={14} /> {measurement.points.length < 3 || measurement.geometryStatus === "missing" || measurement.geometryStatus === "uncertain" ? "Kontur zeichnen" : "Kontur korrigieren"}</button>
+                          {measurement.kind === "room" && !["insta360-reference", "laser-reference", "special-geometry", "freehand-sketch"].includes(measurement.areaSource ?? "") && (
+                            <button className="geometry-action" onClick={() => startGeometryCorrection(measurement)}><Pentagon size={14} /> {measurement.points.length >= 3 ? "Kontur bearbeiten" : "Kontur einzeichnen"}</button>
                           )}
                           <button onClick={() => setEditingId(measurement.id)}><Settings2 size={14} /> Bearbeiten</button>
                           <button onClick={() => updateMeasurement(measurement.id, { visible: !measurement.visible })}>{measurement.visible ? <EyeOff size={14} /> : <Eye size={14} />}{measurement.visible ? "Ausblenden" : "Einblenden"}</button>
@@ -2760,101 +2433,13 @@ export default function MeasureApp() {
         />
       )}
 
-      {showAutoModal && (
-        <Modal title="Auto-Aufmaß aus PDF" subtitle="Räume erkennen und ausgewählte Mengen sofort zusammenrechnen" onClose={() => { if (!isAutoDetecting) setShowAutoModal(false); }} wide>
-          <div className="auto-intro">
-            <span><Sparkles size={21} /></span>
-            <div><strong>Automatische Raumerkennung</strong><small>Mit NRF-Stempel wird die exakte Raumfläche übernommen. Eine Raumkontur wird nur bei eindeutiger Zuordnung verwendet; unsichere Formen werden nicht geschätzt und müssen im Plan nachgezeichnet werden.</small></div>
-          </div>
-
-          <label className="field-label with-top">Welche Mengen sollen berechnet werden?</label>
-          <div className="check-grid auto-quantity-grid">
-            {[
-              { label: "Wandflächen", value: autoIncludeWalls, set: setAutoIncludeWalls },
-              { label: "Deckenflächen", value: autoIncludeCeiling, set: setAutoIncludeCeiling },
-              { label: "Bodenflächen", value: autoIncludeFloor, set: setAutoIncludeFloor },
-              { label: "Fußleisten", value: autoIncludeSkirting, set: setAutoIncludeSkirting },
-            ].map((item) => (
-              <label key={item.label} className={item.value ? "checked" : ""}>
-                <input type="checkbox" checked={item.value} onChange={(event) => item.set(event.target.checked)} />
-                <span><Check size={14} /></span>{item.label}
-              </label>
-            ))}
-          </div>
-
-          <div className="field-grid two with-top">
-            <label><span className="field-label">Standard-Raumhöhe, falls im Plan nicht eindeutig</span><div className="input-with-unit"><EditableNumberInput min="0.1" step="0.01" value={autoRoomHeight} onValueChange={setAutoRoomHeight} /><span>m</span></div></label>
-            <label><span className="field-label">Kleinster Raum</span><div className="input-with-unit"><EditableNumberInput min="0.25" step="0.25" value={autoMinRoomArea} onValueChange={setAutoMinRoomArea} /><span>m²</span></div></label>
-          </div>
-
-          {pageScale && (
-            <>
-              <label className="field-label with-top">Maßstabsquelle</label>
-              <div className="segmented two">
-                <button className={autoScaleSource === "pdf" ? "active" : ""} onClick={() => setAutoScaleSource("pdf")}>PDF-Planmaßstab</button>
-                <button className={autoScaleSource === "calibrated" ? "active" : ""} onClick={() => { setAutoScaleSource("calibrated"); setIncludedPages([pageNumber]); }}>Kalibrierung Seite {pageNumber}</button>
-              </div>
-            </>
-          )}
-
-          <div className="page-selection-toolbar with-top">
-            <span><strong>Welche PDF-Seiten sollen zusammengerechnet werden?</strong><small>{includedPages.length} von {pageCount} Seiten ausgewählt</small></span>
-            <div>
-              <button type="button" disabled={autoScaleSource === "calibrated"} onClick={() => setIncludedPages(Array.from({ length: pageCount }, (_, index) => index + 1))}>Alle</button>
-              <button type="button" onClick={() => setIncludedPages([pageNumber])}>Nur Seite {pageNumber}</button>
-            </div>
-          </div>
-          <div className="page-selection-grid">
-            {Array.from({ length: pageCount }, (_, index) => index + 1).map((page) => {
-              const included = includedPages.includes(page);
-              const denominator = autoScaleDenominators[page] || "";
-              const missingScale = included && autoScaleSource === "pdf" && !denominator;
-              return (
-                <div key={page} className={`page-selection-card ${included ? "selected" : ""} ${missingScale ? "missing-scale" : ""}`}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={included}
-                      disabled={autoScaleSource === "calibrated"}
-                      onChange={(event) => setIncludedPages((current) => event.target.checked
-                        ? Array.from(new Set([...current, page])).sort((left, right) => left - right)
-                        : current.filter((item) => item !== page))}
-                    />
-                    <span className="material-check"><Check size={13} /></span>
-                    <span className="page-card-title"><strong>Seite {page}</strong><small>{autoPageKinds[page] ?? "Planseite"}{autoPageKinds[page] && autoPageKinds[page] !== "Grundriss" ? " · nicht vorausgewählt" : ""}{autoDimensionCounts[page] ? ` · ${autoDimensionCounts[page]} Maße erkannt` : ""}</small></span>
-                  </label>
-                  {autoScaleSource === "pdf" ? (
-                    <label className="page-scale-input">
-                      <span>Maßstab {autoScaleDetectedPages[page] ? <em className="detected-chip">erkannt</em> : null}</span>
-                      <div><b>1 :</b><EditableNumberInput min="1" step="1" placeholder="eingeben" value={denominator} onValueChange={(value) => {
-                        setAutoScaleDenominators((current) => ({ ...current, [page]: value }));
-                        setAutoScaleDetectedPages((current) => ({ ...current, [page]: false }));
-                      }} /></div>
-                    </label>
-                  ) : <small>Kalibriert über Referenzstrecke</small>}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="auto-notice"><AlertTriangle size={18} /><span><strong>Maßstab und PDF-Maße werden gemeinsam geprüft</strong><small>Fehlt der Maßstab, muss er eingetragen oder über eine bekannte Strecke kalibriert werden. Erkannte Maßketten werden zur Anpassung der Raumgeometrie verwendet; ohne Textstempel bleibt die Konturprüfung erforderlich.</small></span></div>
-
-          <div className="modal-actions auto-actions">
-            <button className="button ghost" disabled={isAutoDetecting} onClick={() => { setShowAutoModal(false); setResumeAutoAfterCalibration(true); setAutoScaleSource("calibrated"); setIncludedPages([pageNumber]); selectTool("calibrate"); showToast("Zwei Punkte einer bekannten Strecke anklicken."); }}><Ruler size={16} /> Manuell kalibrieren</button>
-            <span className="modal-action-spacer" />
-            <button className="button ghost" disabled={isAutoDetecting} onClick={() => setShowAutoModal(false)}>Abbrechen</button>
-            <button className="button primary" disabled={isAutoDetecting} onClick={runAutoMeasurement}>{isAutoDetecting ? <><LoaderCircle className="spin" size={16} /> Wird berechnet …</> : <><FileSpreadsheet size={16} /> Berechnen & Excel vorbereiten</>}</button>
-          </div>
-        </Modal>
-      )}
-
       {showCalibrationModal && (
-        <Modal title="Maßstab kalibrieren" subtitle="Gib die tatsächliche Länge der markierten Strecke ein." onClose={() => { setShowCalibrationModal(false); setCalibrationPoints([]); setResumeAutoAfterCalibration(false); }}>
+        <Modal title="Maßstab kalibrieren" subtitle="Gib die tatsächliche Länge der markierten Strecke ein." onClose={() => { setShowCalibrationModal(false); setCalibrationPoints([]); }}>
           <div className="calibration-preview"><Ruler size={20} /><span>Referenzstrecke auf Seite {pageNumber}</span><strong>{calibrationPoints.length === 2 ? `${Math.round(distance(calibrationPoints[0], calibrationPoints[1]))} px` : "–"}</strong></div>
           <label className="field-label">Tatsächliche Länge</label>
           <div className="input-with-unit"><input autoFocus inputMode="decimal" value={calibrationDistance} onChange={(event) => setCalibrationDistance(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveCalibration(); }} /><span>m</span></div>
           <p className="form-hint">Am genauesten ist eine möglichst lange, eindeutig bemaßte Strecke.</p>
-          <div className="modal-actions"><button className="button ghost" onClick={() => { setShowCalibrationModal(false); setCalibrationPoints([]); setResumeAutoAfterCalibration(false); }}>Abbrechen</button><button className="button primary" onClick={saveCalibration}><Check size={16} /> Kalibrieren</button></div>
+          <div className="modal-actions"><button className="button ghost" onClick={() => { setShowCalibrationModal(false); setCalibrationPoints([]); }}>Abbrechen</button><button className="button primary" onClick={saveCalibration}><Check size={16} /> Kalibrieren</button></div>
         </Modal>
       )}
 
@@ -2862,6 +2447,9 @@ export default function MeasureApp() {
         <MeasurementModal
           kind={pendingGeometry.kind}
           index={measurements.filter((measurement) => measurement.kind === pendingGeometry.kind).length + 1}
+          points={pendingGeometry.points}
+          scale={pageScale}
+          roomDefaults={roomDefaults}
           onClose={() => setPendingGeometry(null)}
           onSave={saveMeasurement}
         />
@@ -2887,7 +2475,7 @@ export default function MeasureApp() {
               && patch.height !== undefined
               && Math.abs(patch.height - (current.height ?? 0)) > 0.0001;
             updateMeasurement(editingId, heightChanged
-              ? { ...patch, heightSource: "manual", heightNote: "Automatisch erkannte Raumhöhe manuell korrigiert." }
+              ? { ...patch, heightSource: "manual", heightNote: "Raumhöhe manuell eingetragen oder korrigiert." }
               : patch);
             setEditingId(null);
             showToast("Position wurde aktualisiert.");
@@ -2965,6 +2553,9 @@ type AuditTone = "verified" | "review" | "manual";
 
 function getAuditState(measurement: Measurement | undefined, line: LineItem): { tone: AuditTone; source: string; status: string; detail: string } {
   if (!measurement) return { tone: "review", source: "Keine Zuordnung", status: "Prüfen", detail: "Die Aufmaßposition ist keiner Geometrie zugeordnet." };
+  if (measurement.areaSource === "pdf-manual") {
+    return { tone: "manual", source: "Manuelle PDF-Kontur", status: "Eingabe prüfen", detail: "Raumkontur wurde im PDF eingezeichnet; Fläche und Umfang wurden aus dem kalibrierten Planmaßstab berechnet." };
+  }
   if (measurement.areaSource === "pdf-nrf") {
     const geometryMissing = measurement.geometryStatus === "missing" || measurement.geometryStatus === "uncertain";
     if (line.category === "Boden" || line.category === "Decke") {
@@ -3124,7 +2715,7 @@ function AuditModal({
         )) : <p>Noch keine Fenster- oder Türöffnungen erfasst. Wandflächen enthalten deshalb keine Abzüge.</p>}
       </section>
 
-      <div className="audit-note"><AlertTriangle size={16} /><span><strong>Prüfhinweis</strong><small>PDF-Raumstempel sind direkte Planwerte. Automatisch erkannte Raumkonturen, Umfänge, Raumhöhen und Öffnungen müssen vor Abrechnung mit Plan und Leistungsverzeichnis abgeglichen werden.</small></span></div>
+      <div className="audit-note"><AlertTriangle size={16} /><span><strong>Prüfhinweis</strong><small>Manuell eingezeichnete Raumkonturen, der verwendete Maßstab, Raumhöhen und Öffnungen müssen vor Abrechnung mit Plan und Leistungsverzeichnis abgeglichen werden.</small></span></div>
 
       <div className="modal-actions audit-actions">
         <button className="button ghost" disabled={isExporting || isExportingPdf || isSavingProject} onClick={onClose}>Schließen</button>
@@ -3284,24 +2875,42 @@ function ExcelExportModal({
   );
 }
 
-function MeasurementModal({ kind, index, onClose, onSave }: { kind: MeasurementKind; index: number; onClose: () => void; onSave: (values: { name: string; height: number; quantity: number; factor: number; includeFloor: boolean; includeCeiling: boolean; includeWalls: boolean; includeSkirting: boolean; category: string }) => void }) {
+function MeasurementModal({ kind, index, points, scale, roomDefaults, onClose, onSave }: {
+  kind: MeasurementKind;
+  index: number;
+  points: Point[];
+  scale?: number;
+  roomDefaults: RoomDefaults;
+  onClose: () => void;
+  onSave: (values: { name: string; height: number; quantity: number; factor: number; includeFloor: boolean; includeCeiling: boolean; includeWalls: boolean; includeSkirting: boolean; category: string }) => void;
+}) {
   const defaultName = kind === "room" ? `Raum ${String(index).padStart(2, "0")}` : kind === "area" ? `Fläche ${String(index).padStart(2, "0")}` : kind === "line" ? `Länge ${String(index).padStart(2, "0")}` : `Bauteil ${String(index).padStart(2, "0")}`;
   const [name, setName] = useState(defaultName);
-  const [height, setHeight] = useState(2.5);
+  const [height, setHeight] = useState(roomDefaults.height);
   const [quantity, setQuantity] = useState(1);
   const [factor, setFactor] = useState(1);
-  const [includeFloor, setIncludeFloor] = useState(false);
-  const [includeCeiling, setIncludeCeiling] = useState(true);
-  const [includeWalls, setIncludeWalls] = useState(true);
-  const [includeSkirting, setIncludeSkirting] = useState(false);
+  const [includeFloor, setIncludeFloor] = useState(roomDefaults.includeFloor);
+  const [includeCeiling, setIncludeCeiling] = useState(roomDefaults.includeCeiling);
+  const [includeWalls, setIncludeWalls] = useState(roomDefaults.includeWalls);
+  const [includeSkirting, setIncludeSkirting] = useState(roomDefaults.includeSkirting);
   const [category, setCategory] = useState(kind === "area" ? "Wand" : kind === "line" ? "Sockelleiste" : "");
-  const title = kind === "room" ? "Raum übernehmen" : kind === "area" ? "Fläche übernehmen" : kind === "line" ? "Länge übernehmen" : "Stückzahl übernehmen";
+  const title = kind === "room" ? "Raumaufmaß erstellen" : kind === "area" ? "Fläche übernehmen" : kind === "line" ? "Länge übernehmen" : "Stückzahl übernehmen";
+  const roomArea = kind === "room" && scale ? polygonPixels(points) * scale * scale : 0;
+  const roomPerimeter = kind === "room" && scale ? polylinePixels(points, true) * scale : 0;
+  const wallArea = roomPerimeter * height;
   const validInputs = Number.isFinite(quantity) && quantity > 0
     && Number.isFinite(factor) && factor > 0
     && (kind !== "room" || (Number.isFinite(height) && height > 0));
 
   return (
-    <Modal title={title} subtitle="Bezeichnung und Berechnungsart festlegen" onClose={onClose}>
+    <Modal title={title} subtitle={kind === "room" ? "Kontur prüfen und gewünschte Aufmaßpositionen auswählen" : "Bezeichnung und Berechnungsart festlegen"} onClose={onClose}>
+      {kind === "room" && (
+        <div className="manual-room-geometry">
+          <span><Pentagon size={20} /></span>
+          <div><strong>Raumkontur aus {points.length} Eckpunkten</strong><small>Die Werte werden unmittelbar aus der eingezeichneten Form und dem Seitenmaßstab berechnet.</small></div>
+          <dl><div><dt>Grundfläche</dt><dd>{formatNumber(roomArea)} m²</dd></div><div><dt>Umfang</dt><dd>{formatNumber(roomPerimeter)} m</dd></div></dl>
+        </div>
+      )}
       <label className="field-label">Bezeichnung</label>
       <input className="text-input" autoFocus value={name} onChange={(event) => setName(event.target.value)} />
       {kind === "room" && (
@@ -3314,6 +2923,12 @@ function MeasurementModal({ kind, index, onClose, onSave }: { kind: MeasurementK
           </div>
           <label className="field-label with-top">Raumhöhe</label>
           <div className="input-with-unit"><EditableNumberInput min="0.1" step="0.01" value={height} onValueChange={setHeight} /><span>m</span></div>
+          <div className="manual-room-results" aria-label="Vorschau des Raumaufmaßes">
+            <div className={includeWalls ? "included" : "excluded"}><span>Wände</span><strong>{formatNumber(wallArea * quantity * factor)} m²</strong></div>
+            <div className={includeCeiling ? "included" : "excluded"}><span>Decke</span><strong>{formatNumber(roomArea * quantity * factor)} m²</strong></div>
+            <div className={includeFloor ? "included" : "excluded"}><span>Boden</span><strong>{formatNumber(roomArea * quantity * factor)} m²</strong></div>
+            <div className={includeSkirting ? "included" : "excluded"}><span>Sockelleiste</span><strong>{formatNumber(roomPerimeter * quantity * factor)} m</strong></div>
+          </div>
         </>
       )}
       {kind === "area" && <><label className="field-label with-top">Flächenart</label><select className="text-input" value={category} onChange={(event) => setCategory(event.target.value)}>{areaCategories.map((item) => <option key={item}>{item}</option>)}</select></>}

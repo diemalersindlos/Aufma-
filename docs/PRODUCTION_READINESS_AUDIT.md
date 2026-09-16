@@ -139,24 +139,15 @@ Die Kennzeichnung „Pilotbetrieb“ bleibt bestehen, weil Firmenrollen und Rech
 - Ursache der nicht löschbaren Null: Direkte Umwandlung eines leeren HTML-Zahlenfeldes mit `Number("")` in den Zahlenwert `0`.
 - Gemeinsame Zahlenfeldeingabe mit getrenntem Bearbeitungsentwurf eingeführt. Ein leeres Feld bleibt während der Neueingabe sichtbar leer und wird nicht mehr sofort auf 0 zurückgesetzt.
 - Bewusst eingegebene 0 bleibt weiterhin ein echter Wert; leere Eingabe und Zahlenwert 0 sind technisch getrennt.
-- Hauptaufmaß, PDF-Automatik, Maßstab, Material, Öffnungen, Laibungen, Laser, Sonderflächen und Insta360 verwenden dieselbe korrigierte Eingabelogik.
+- Hauptaufmaß, manuelles PDF-Aufmaß, Maßstab, Material, Öffnungen, Laibungen, Laser, Sonderflächen und Insta360 verwenden dieselbe korrigierte Eingabelogik.
 - Regressionstest prüft leere Eingabe, Dezimalkomma, Dezimalpunkt, bewusste 0 und alle drei PC-Eingabeoberflächen.
 
-## Eindeutige PDF-Raumkonturen V43
+## Manuelles PDF-Raumaufmaß V46
 
-- Die digitale Probe-PDF wurde seitenweise geprüft: Raumbezeichnungen und NRF-Flächen werden korrekt aus den Raumstempeln gelesen; die fehlerhaften Ergebnisse entstanden bei der anschließenden Geometriezuordnung.
-- Erkannte Konturen werden nicht mehr künstlich auf die NRF-Fläche skaliert. Dadurch können keine erfundenen Wandlängen oder übergroßen Polygone mehr entstehen.
-- Eine Kontur gilt nur dann als zugeordnet, wenn genau ein Raumstempel enthalten ist, Flächenverhältnis und Erkennungswert plausibel sind und dieselbe Kontur keinem zweiten Raum zugeordnet wird.
-- Bei fehlender oder mehrdeutiger Kontur bleibt die ausgelesene NRF-Fläche erhalten, der Raumumfang wird jedoch als „nicht bestimmt“ ausgewiesen. Angeforderte Wand- und Sockelmengen bleiben bis zur manuellen Konturbestätigung gesperrt.
-- Unsichere Räume erscheinen im Plan als kompakte gelbe Prüfmarke. Über „Kontur zeichnen“ beziehungsweise „Kontur korrigieren“ kann der Benutzer die tatsächlichen Raumecken setzen; danach werden Umfang, Wandfläche und Sockelleiste neu berechnet.
-- Bereits gespeicherte PDF-NRF-Konturen aus älteren Versionen werden beim Öffnen als ungeprüft markiert; ihre bisherigen Wand-/Sockelansätze sind bis zur erneuten Konturbestätigung gesperrt, während die Originalpunkte zur Korrektur erhalten bleiben.
-- PDF- und Excel-Prüfnachweise weisen fehlende Konturen ausdrücklich aus. Qualitätsprüfung und Projektfreigabe behandeln einen noch offenen Wand-/Sockelansatz als Fehler.
-- Ein eigener Regressionstest deckt eindeutige Treffer, Mehrraumkonturen, unplausible Flächenverhältnisse, fehlende Konturen und die Auswahl des besten Erkennungslaufs ab.
-
-## Präzisere Einzelraumanzeige V44
-
-- Die Rasteranalyse verkleinert digitale Pläne nicht mehr pauschal auf 1.000 Pixel. Auf dem Desktop wird die Grundrissgeometrie bis 1.600 Pixel Analysebreite ausgewertet; auf kleineren Geräten bleibt mindestens die vollständige 1.180-Pixel-Basis erhalten.
-- Drei unterschiedliche Lückenschließungen werden weiterhin getrennt berechnet, ihre Kandidaten aber raumweise zusammengeführt. Dadurch kann jeder Raum die beste plausible Kontur seines Erkennungslaufs verwenden, statt die gesamte PDF-Seite auf nur einen Lauf festzulegen.
-- Flächen- und Sicherheitsprüfung bleiben unverändert streng: Mehrraumkonturen, unplausible Flächenabweichungen und unsichere Ergebnisse werden weiterhin nicht als Wandumfang übernommen.
-- Nach dem Auto-Aufmaß wird keine Raumkontur automatisch eingeblendet. Die rechte Aufmaßliste bleibt die führende Auswahl; ein Klick öffnet bei Bedarf die richtige PDF-Seite und zeigt ausschließlich den ausgewählten Raum.
-- Beim Wechsel auf einen anderen Listeneintrag wird die vorherige Raumkontur ausgeblendet. Die Projektdaten und Berechnungen bleiben vollständig erhalten.
+- Die automatische PDF-Raumerkennung einschließlich Rasterdetektor, Textmaskierung und Konturzuordnung wurde vollständig aus dem Programmablauf entfernt.
+- Räume werden wie in einem PDF-Messwerkzeug durch Anklicken ihrer tatsächlichen Eckpunkte im Grundriss eingezeichnet.
+- Ein vorhandener PDF-Planmaßstab wird nur als Messgrundlage gelesen; ist er nicht vorhanden, verlangt das Programm vor dem Zeichnen eine manuelle Kalibrierung.
+- Während des Zeichnens werden Seitenlängen, Grundfläche und Umfang direkt angezeigt. Fehl gesetzte Punkte können einzeln zurückgenommen werden.
+- Vor dem Speichern zeigt der Raumdialog das vollständige Aufmaß für Wände, Decke, Boden und Sockelleiste. Der Benutzer bestimmt selbst, welche Positionen übernommen werden.
+- Gespeicherte Konturen können als Ganzes verschoben, an einzelnen Eckpunkten korrigiert oder vollständig neu gezeichnet werden; die Aufmaßwerte werden anschließend neu berechnet.
+- Ein Regressionstest stellt sicher, dass kein automatischer PDF-Raumdetektor mehr ausgeführt wird und der manuelle Raumablauf vollständig verfügbar bleibt.

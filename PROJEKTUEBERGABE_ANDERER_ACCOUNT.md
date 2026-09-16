@@ -1,5 +1,7 @@
 # MalerAufmaß Pro – Übergabe an einen anderen ChatGPT-Account
 
+> **Hinweis V46 (16. September 2026):** Die früher beschriebene automatische PDF-Raumerkennung ist nicht mehr Bestandteil des Programms. Räume werden ausschließlich manuell im PDF eingezeichnet; `README.md`, `CLAUDE.md` und `ARBEITSSTAND_V46.md` sind für den aktuellen Ablauf maßgeblich.
+
 Stand der Übergabe: 1. September 2026  
 Zuletzt veröffentlichter Stand laut bisherigem Projektverlauf: Version 44  
 Veröffentlichte Anwendung: https://maler-aufmass-pro.marcelbening.chatgpt.site

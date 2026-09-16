@@ -301,6 +301,7 @@ function csvFile(rows: unknown[][]) {
 
 function sourceLabel(measurement: Measurement | undefined) {
   if (!measurement) return "Keine Zuordnung";
+  if (measurement.areaSource === "pdf-manual") return "Manuelle PDF-Kontur";
   if (measurement.areaSource === "pdf-nrf") return measurement.geometryStatus === "missing" || measurement.geometryStatus === "uncertain"
     ? "PDF-Raumstempel · Kontur nicht bestimmt"
     : "PDF-Raumstempel";

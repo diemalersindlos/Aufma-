@@ -22,7 +22,6 @@ assert.ok(mobile.bitmapWidth <= 6144 && mobile.bitmapHeight <= 6144, "Die mobile
 const viewerSource = readFileSync(new URL("../components/measure-app.tsx", import.meta.url), "utf8");
 assert.match(viewerSource, /transform: \[scaleX, 0, 0, scaleY, 0, 0\]/, "PDF.js muss die hochauflösende Ausgabetransformation direkt erhalten.");
 assert.doesNotMatch(viewerSource, /transform: `scale\(\$\{zoom\}\)`/, "Der PDF-Plan darf nicht mehr als bereits gerasterte Ebene hochskaliert werden.");
-assert.match(viewerSource, /highPrecisionAnalysisWidth = window\.innerWidth >= 900 \? 1600 : 1180/, "Die Desktop-Raumerkennung muss den Plan mit erhöhter Analyseauflösung auswerten.");
-assert.doesNotMatch(viewerSource, /Math\.min\(1, 1000 \/ fullViewport\.width\)/, "Die Raumerkennung darf digitale Pläne nicht mehr pauschal auf 1000 Pixel verkleinern.");
+assert.match(viewerSource, /calculatePdfRenderMetrics/, "Die PDF-Anzeige muss weiterhin in Geräteauflösung nachgerendert werden.");
 
 console.log(JSON.stringify({ normal, enlarged, mobile }));

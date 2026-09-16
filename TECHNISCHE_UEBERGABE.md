@@ -1,6 +1,8 @@
 # MalerAufmaß Pro – technische Übergabe
 
-> Nachtrag vom 1. September 2026: Auf Grundlage dieses Exports wurde der lokal vollständig getestete **V45-Kandidat** erstellt. Er setzt leere neue Projekte, eine vertikale Projektwahl und die automatische Begradigung rechtwinkliger Handskizzen um. Einzelheiten stehen in `ARBEITSSTAND_V45.md`. Dieser Nachfolgestand ist wegen fehlenden Editorzugriffs noch nicht in Sites veröffentlicht.
+> **Hinweis V46 (16. September 2026):** Die nachfolgend dokumentierte automatische PDF-Raumerkennung ist historisch und wurde vollständig entfernt. Verbindlich ist jetzt das manuelle Einzeichnen der Raumkonturen gemäß `README.md`, `CLAUDE.md` und `ARBEITSSTAND_V46.md`.
+
+> Historischer Nachtrag vom 1. September 2026: Auf Grundlage dieses Exports wurde der V45-Kandidat erstellt. Der aktuelle Nachfolgestand und seine Prüfungen stehen in `ARBEITSSTAND_V46.md`.
 
 Exportdatum: 1. September 2026  
 Live-Adresse: https://maler-aufmass-pro.marcelbening.chatgpt.site  

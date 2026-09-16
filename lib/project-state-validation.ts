@@ -128,7 +128,7 @@ export function validateStoredProjectState(value: unknown): ProjectStateValidati
 
   const panoramas = value.panoramas ?? [];
   if (!Array.isArray(panoramas) || panoramas.length > PROJECT_STATE_LIMITS.maxPanoramas) return { ok: false, error: "Die 360°-Anlagen sind ungültig oder zu zahlreich." };
-  if (!record(value.materials) || !record(value.autoSettings)) return { ok: false, error: "Material- oder Auto-Aufmaß-Einstellungen fehlen." };
+  if (!record(value.materials) || !record(value.autoSettings)) return { ok: false, error: "Material- oder Raum-Voreinstellungen fehlen." };
 
   return { ok: true, state: value as unknown as StoredProjectState };
 }

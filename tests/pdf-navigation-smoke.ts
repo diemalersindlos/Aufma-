@@ -11,16 +11,15 @@ assert.match(viewerSource, /event\.ctrlKey \|\| event\.metaKey/, "Mausrad-Zoom m
 assert.match(viewerSource, /aria-label="Ermittelte Maße, scrollbar"/, "Die rechte Maßliste muss als eigener Scrollbereich ausgezeichnet sein.");
 assert.ok((viewerSource.match(/measurementIsVisibleOnPlan\(measurement, selectedId\)/g) ?? []).length >= 2, "Sichere und unsichere Raumkonturen dürfen nur nach Auswahl in der Seitenliste erscheinen.");
 assert.match(viewerSource, /if \(measurement\.page !== pageNumber\) changePage\(measurement\.page\)/, "Ein Raumklick muss automatisch auf die zugehörige PDF-Seite wechseln.");
-assert.match(viewerSource, /setSelectedId\(null\);\s*setExpandedId\(null\);\s*setListMode\("positions"\)/, "Nach dem Auto-Aufmaß darf kein Raum ungefragt den Grundriss überdecken.");
 assert.match(viewerSource, /function RoomOutlinePreview/, "Ein angeklickter Raum muss seinen berechneten Umriss sofort in einer Vorschau zeigen.");
 assert.match(viewerSource, /measurement\.proCapture\?\.sketchPoints/, "Die Umrissvorschau muss die tatsächlich erkannte Freihandskizzenkontur verwenden.");
 assert.match(viewerSource, /selected\?\.kind === "room"[\s\S]*?<RoomOutlinePreview measurement=\{selected\}/, "Die Umrissvorschau muss unmittelbar an die aktuelle Raumauswahl gekoppelt sein.");
 assert.match(viewerSource, /Kein belastbarer Umriss[\s\S]*?keine Form erfunden oder geschätzt/, "Ohne bestätigte Kontur darf die Vorschau keinen Raumumriss erfinden.");
-assert.match(viewerSource, /measurement\.source === "auto"[\s\S]*?\["pdf-nrf", "pdf-dimensions", "pdf-scale"\][\s\S]*?Kontur korrigieren/, "Jeder automatisch erkannte PDF-Raum muss nach dem Anklicken korrigierbar sein.");
-assert.match(viewerSource, /heightSource: detectedRoomHeight \? "pdf-room" : "project-default"/, "Automatisch erkannte und ersatzweise verwendete Raumhöhen müssen unterscheidbar gespeichert werden.");
+assert.match(viewerSource, /measurement\.kind === "room"[\s\S]*?Kontur bearbeiten/, "Jeder eingezeichnete PDF-Raum muss nach dem Anklicken korrigierbar sein.");
+assert.match(viewerSource, /heightSource: kind === "room" \? "manual"/, "Die Raumhöhe eines eingezeichneten Raums muss als manuelle Eingabe gespeichert werden.");
 assert.match(viewerSource, /type="file"[^>]*multiple[^>]*onChange=\{handleFile\}/, "Der Grundriss-Upload muss mehrere PDF-Dateien auf einmal annehmen.");
 assert.match(viewerSource, /PdfLibDocument\.create\(\)[\s\S]*?copyPages\(source, source\.getPageIndices\(\)\)/, "Mehrere PDFs müssen in Auswahlreihenfolge zu einem Plansatz verbunden werden.");
-assert.match(viewerSource, /beginGeometryDrag\(event, "outline"\)/, "Eine erkannte Raumkontur muss als Ganzes verschiebbar sein.");
+assert.match(viewerSource, /beginGeometryDrag\(event, "outline"\)/, "Eine Raumkontur muss als Ganzes verschiebbar sein.");
 assert.match(viewerSource, /beginGeometryDrag\(event, "vertex", index\)/, "Einzelne Eckpunkte einer Raumkontur müssen verschiebbar sein.");
 
 assert.match(stylesheet, /\.results-panel \{[^}]*min-height: 0;[^}]*overflow: hidden;/, "Die rechte Spalte muss auf die verfügbare Ansichtshöhe begrenzt sein.");

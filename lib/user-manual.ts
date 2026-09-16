@@ -1,5 +1,5 @@
-export const USER_MANUAL_VERSION = "45";
-export const USER_MANUAL_UPDATED = "01.09.2026";
+export const USER_MANUAL_VERSION = "46";
+export const USER_MANUAL_UPDATED = "16.09.2026";
 
 export type ManualSection = {
   id: string;
@@ -34,8 +34,8 @@ export const userManualSections: ManualSection[] = [
     steps: [
       "Projekt anlegen und Projektbezeichnung, Auftraggeber, Baustelle, Referenz und Aufnehmer eintragen.",
       "PDF-Grundriss laden oder Räume über Bluetooth-Laser, Handeingabe, Sprache, Skizze oder Insta360 erfassen.",
-      "Gewünschte PDF-Seiten sowie Wand, Decke, Boden und Fußleisten auswählen.",
-      "Maßstab und erkannte Raumkonturen kontrollieren; unsichere Werte korrigieren.",
+      "Auf jeder gewünschten PDF-Seite den Maßstab prüfen oder über eine bekannte Strecke kalibrieren.",
+      "„Raum einzeichnen“ wählen, die Raumecken anklicken und anschließend Wand, Decke, Boden und Fußleisten auswählen.",
       "Öffnungen, Sonderflächen und Materialverbrauch ergänzen.",
       "Im Bereich Prüfen alle Positionen freigeben und anschließend Excel oder PDF exportieren.",
     ],
@@ -49,36 +49,34 @@ export const userManualSections: ManualSection[] = [
     platform: "PC",
     steps: [
       "Eine oder mehrere PDF-Dateien gemeinsam auswählen oder auf die Zeichenfläche ziehen. Mehrere PDFs werden in ihrer Auswahlreihenfolge zu einem Plansatz verbunden.",
-      "Im Seitenauswahlfenster nur die Grundrissseiten markieren, die in das Aufmaß gehören.",
+      "Alle geladenen Seiten stehen zum manuellen Einzeichnen bereit; mit den Seitentasten zur gewünschten Grundrissseite wechseln.",
       "Mit Zoom +/−, Strg beziehungsweise ⌘ plus Mausrad oder Zwei-Finger-Geste vergrößern und verkleinern.",
       "Die HD-Anzeige bestätigt, dass PDF, Maßlinien und Beschriftungen nach jeder Zoomstufe automatisch in Geräteauflösung nachgerendert werden.",
       "Mit einem Finger oder gedrückter linker Maustaste über große Pläne ziehen; das Mausrad scrollt senkrecht, Umschalt plus Mausrad waagerecht.",
       "Die rechte Aufmaßliste besitzt einen eigenen Bildlaufbereich und kann unabhängig vom Grundriss bis zur letzten Position gescrollt werden.",
       "Für jede verwendete Seite Maßstab prüfen oder über eine möglichst lange bekannte Strecke kalibrieren.",
     ],
-    tips: ["Ansichten und Schnitte nicht versehentlich mit Grundrissen zusammenrechnen.", "Ohne Maßstab werden nur Maße aus Raumstempel oder Maßketten übernommen.", "Nach schnellem Zoomen kurz warten: Die Seite wird sofort nachgeschärft, ohne den Maßstab oder das Aufmaß zu verändern."],
+    tips: ["Ansichten und Schnitte nicht versehentlich als Raumgrundriss verwenden.", "Ohne Maßstab fordert das Programm vor dem Einzeichnen eine Kalibrierung an.", "Nach schnellem Zoomen kurz warten: Die Seite wird sofort nachgeschärft, ohne den Maßstab oder das Aufmaß zu verändern."],
     keywords: ["pdf", "zoom", "scroll", "mausziehen", "aufmaßliste", "seiten", "maßstab", "kalibrieren", "scharf", "schärfe", "hd", "skalieren"],
   },
   {
-    id: "automatic",
-    title: "Automatische Grundrisserkennung",
-    summary: "Räume, Raumbezeichnungen und Maßketten auch ohne Raumstempel auswerten.",
+    id: "manual-pdf-rooms",
+    title: "Räume manuell im PDF einzeichnen",
+    summary: "Raumkonturen wie in einem PDF-Messwerkzeug selbst festlegen und sofort berechnen.",
     platform: "PC",
     steps: [
-      "Auto-Aufmaß öffnen, gewünschte Mengen auswählen und eine Standard-Raumhöhe für Räume ohne lesbare Höhenangabe festlegen.",
-      "Zu berechnende Seiten markieren und Maßstäbe kontrollieren.",
-      "Erkennung starten: Auslesbare Raumbezeichnung und NRF-Fläche werden direkt übernommen. Kräftige, zusammenhängende Wandkörper werden gegenüber dünnen oder gestrichelten Achs-, Maß- und Hilfslinien bevorzugt; eine Kontur wird nur bei eindeutiger, flächenplausibler Zuordnung angezeigt.",
-      "Eindeutige Angaben wie „RH 2,75“, „Raumhöhe 2,75 m“ oder „lichte Höhe 2,75“ werden automatisch dem passenden Raum zugeordnet. Angaben aus Schnitt und Ansicht werden nicht übernommen.",
-      "Ein gelbes Ausrufezeichen bedeutet „Kontur nicht eindeutig“. Die Software schätzt dann keinen Raumumfang und berechnet weder Wandfläche noch Fußleiste.",
-      "Nach dem Auto-Aufmaß bleiben die Räume zunächst nur in der rechten Aufmaßliste sichtbar, damit der Grundriss frei lesbar bleibt.",
-      "Einen Raum in der rechten Liste anklicken. Das Programm öffnet automatisch seine PDF-Seite und zeigt ausschließlich diesen Raum mit Kontur, Bezeichnung und Fläche im Grundriss.",
-      "Einen anderen Raum anklicken, um die bisherige Markierung vollständig zu ersetzen; es werden niemals alle Raumkonturen gleichzeitig eingeblendet.",
-      "Jeden automatisch erkannten Raum rechts anklicken und „Kontur zeichnen“ oder „Kontur korrigieren“ wählen. Eine vorhandene Kontur kann als Ganzes verschoben werden; einzelne Eckpunkte lassen sich separat ziehen. Mit „Neu zeichnen“ kann die Kontur vollständig ersetzt werden. Danach „Abschließen“ wählen; Fläche, Umfang, Wand und Sockel werden neu berechnet.",
-      "Erkannte gestrichelte Konturen ebenfalls mit dem Plan vergleichen und bei Bedarf über „Kontur korrigieren“ ersetzen.",
-      "Gelbe oder rote Hinweise öffnen und fehlende Maße manuell ergänzen.",
+      "PDF-Grundriss öffnen und zur gewünschten Seite wechseln.",
+      "Den angezeigten Maßstab prüfen. Fehlt er, „Neu kalibrieren“ wählen und zwei Punkte einer bekannten Strecke anklicken.",
+      "„Raum einzeichnen“ wählen und jede innere Raumecke nacheinander anklicken.",
+      "Zum Schließen erneut den ersten Punkt anklicken, Enter drücken oder „Abschließen“ wählen. Mit „Letzten Punkt löschen“ kann ein Fehlklick sofort zurückgenommen werden.",
+      "Im Raumdialog Bezeichnung und Raumhöhe eintragen. Wand, Decke, Boden und Sockelleiste nach Bedarf aktivieren.",
+      "Grundfläche, Umfang und die daraus entstehenden Aufmaßwerte in der Sofortvorschau kontrollieren und den Raum übernehmen.",
+      "Den Raum rechts in der Aufmaßliste anklicken, um nur seine Kontur und Berechnung anzuzeigen.",
+      "Über „Kontur bearbeiten“ die ganze Kontur verschieben oder einzelne Eckpunkte ziehen; nach „Abschließen“ werden alle Mengen neu berechnet.",
+      "Fenster und Türen anschließend über das Werkzeug „Abzug“ dem Raum zuordnen.",
     ],
-    tips: ["Die NRF-Fläche darf sicher übernommen sein, obwohl der Raumumfang noch fehlt. Das ist kein Widerspruch: Wandflächen benötigen zusätzlich eine bestätigte Kontur.", "Die Software vergrößert oder erfindet keine Raumkontur, nur damit sie zur NRF-Fläche passt.", "Die Raumkontur verschwindet nicht aus dem Projekt, wenn ein anderer Raum gewählt wird; sie wird nur im Grundriss ausgeblendet.", "Ältere gespeicherte Auto-Konturen werden vorsorglich erneut als ungeprüft markiert; Boden-/Deckenfläche bleibt erhalten, Wand und Sockel benötigen eine neue Konturbestätigung."],
-    keywords: ["ki", "automatisch", "raum", "stempel", "maßkette", "erkennung", "kontur", "raumumfang", "gelbes ausrufezeichen"],
+    tips: ["Möglichst genau auf der inneren Wandkante klicken.", "Die Raumkontur verschwindet nicht aus dem Projekt, wenn ein anderer Raum gewählt wird; sie wird nur im Grundriss ausgeblendet.", "Für exakte Werte eine möglichst lange Referenzstrecke zum Kalibrieren verwenden."],
+    keywords: ["pdf", "manuell", "raum", "zeichnen", "eckpunkte", "kontur", "raumumfang", "fläche", "pdf xchange"],
   },
   {
     id: "vob",
